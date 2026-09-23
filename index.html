@@ -257,6 +257,7 @@ const CONFIG = {
   ACCEL: 8,
   STRAFE_SPEED: 5.5,
   TAP_PRESS_RATE: 8,         // one-control tapping: how quickly a held side ramps up to full (and eases off on release)
+  TAP_SIDE_SPEED: 2.2,       // both tapping modes: lanes per second while a side is held (stick modes use STRAFE_SPEED)
   TAP_HEAVY: 0.4,            // tap mode: with a full tray, stepping speed and the tray kick drop by this share
   TAP_FULL_TRAY: 10,         // tap mode: beers that count as a full tray         // lanes per second at full stick / full lean
   STEER_CURVE: 0.6,          // <1 makes small movements stronger (1 = linear)
@@ -281,6 +282,8 @@ const CONFIG = {
   ONE_CONTROL_DEADZONE: 0.03,  // tilt below this keeps you going straight
 
   OBSTACLE_DEPTH: 0.8,
+  MOVING_OBSTACLE_SPEED: 0.5, // multiplier on how fast moving obstacles slide (1 = original speed)
+  OBSTACLE_COVERAGE: 0.7,    // share of each tile an obstacle covers (a 2-tile obstacle covers 1.4 tiles), centred
   BOUNCE_SPEED: 7,           // how hard you bounce back off an obstacle
   STUN_TIME: 0.5,
   HIT_COOLDOWN: 0.8,
@@ -548,11 +551,12 @@ function newRun(){
 function pop(text,color='#fff7e6'){ S.pops.push({text,color,t:S.t}); }
 
 function obsSpan(o,t){
-  if(o.t==='S') return [o.lane,o.lane+o.w];
-  if(o.t==='E'){ const k=.5-.5*Math.cos(t/o.period*2*Math.PI+o.phase); const w=.25+(o.w-.25)*k;
-    return o.side==='R'?[o.lane+1-w,o.lane+1]:[o.lane,o.lane+w]; }
-  const range=o.max-o.min-o.w; const p=(((t*o.speed/range)+o.phase*2)%2+2)%2; const f=p<1?p:2-p;
-  const x0=o.min+f*range; return [x0,x0+o.w];
+  const cov=C.OBSTACLE_COVERAGE, pad=(1-cov)/2;
+  if(o.t==='S'){ const c=o.lane+o.w/2, h=o.w*cov/2; return [c-h,c+h]; }
+  if(o.t==='E'){ const k=.5-.5*Math.cos(t/o.period*2*Math.PI+o.phase); const w=(.25+(o.w-.25)*k)*cov;
+    return o.side==='R'?[o.lane+1-pad-w,o.lane+1-pad]:[o.lane+pad,o.lane+pad+w]; }
+  const range=o.max-o.min-o.w; const p=(((t*o.speed*C.MOVING_OBSTACLE_SPEED/range)+o.phase*2)%2+2)%2; const f=p<1?p:2-p;
+  const x0=o.min+f*range; return [x0+pad*o.w,x0+o.w-pad*o.w];
 }
 
 function drink(){
@@ -617,8 +621,9 @@ function update(dt){
     steer=Math.sign(inp.bal)*Math.pow(clamp((a-dzn)/(C.ONE_CONTROL_FULL_TILT-dzn),0,1),C.STEER_CURVE);
   }
   const xBefore=S.x;
-  S.x=clamp(S.x+steer*C.STRAFE_SPEED*dt,.35,C.LANES-.35);
-  S.steer=(S.x-xBefore)/Math.max(dt,1e-4)/C.STRAFE_SPEED; // actual sideways motion (0 when blocked by a wall)
+  const sideSpeed=(moveMode==='tap'||moveMode==='onetap')?C.TAP_SIDE_SPEED:C.STRAFE_SPEED;
+  S.x=clamp(S.x+steer*sideSpeed*dt,.35,C.LANES-.35);
+  S.steer=(S.x-xBefore)/Math.max(dt,1e-4)/sideSpeed; // actual sideways motion (0 when blocked by a wall)
   let target = inp.my>=0 ? C.BASE_SPEED+inp.my*(C.MAX_SPEED-C.BASE_SPEED) : C.BASE_SPEED+inp.my*(C.BASE_SPEED-C.MIN_SPEED);
   if(S.boost>0) target*=C.DRINK_BOOST_MULT;
   if(S.stun>0) target=0;
@@ -775,7 +780,6 @@ function drawObstacle(g,o){
   const K=KINDS[o.k]; let [x0,x1]=obsSpan(o,S.t); const z0=o.z, z1=o.z+C.OBSTACLE_DEPTH;
   let h=K.h, lift=0, alpha=1;
   if(o.knocked>=0){ const a=S.t-o.knocked; if(a>.6) return; lift=a*6; alpha=1-a/.6; }
-  const inset=.06; x0+=inset; x1-=inset;
   const a=P(x0,z0),b=P(x1,z0),c=P(x1,z1),d=P(x0,z1); if(!a||!d) return;
   g.save(); g.globalAlpha=alpha;
   const L=(p,hh)=>({x:p.x,y:p.y-(hh+lift)*p.s});
@@ -792,7 +796,7 @@ function drawObstacle(g,o){
   if(o.t!=='S'){ g.fillStyle=o.t==='M'?'rgba(242,169,0,.85)':'rgba(255,247,230,.7)'; g.fillRect(fa.x,fa.y-.08*a.s,fb.x-fa.x,.08*a.s); }
   const size=Math.min((fa.y-fb.y)*1.1,(fb.x-fa.x)*.8,a.s*.9);
   if(size>6){ g.font=`${size}px system-ui, "Apple Color Emoji","Segoe UI Emoji",sans-serif`; g.textAlign='center'; g.textBaseline='middle';
-    const n=Math.max(1,Math.round((x1-x0)/.95)); for(let i=0;i<n;i++) g.fillText(K.e, fa.x+(fb.x-fa.x)*(i+.5)/n, (fa.y+fb.y)/2); }
+    const n=Math.max(1,Math.round((x1-x0)/(.95*C.OBSTACLE_COVERAGE))); for(let i=0;i<n;i++) g.fillText(K.e, fa.x+(fb.x-fa.x)*(i+.5)/n, (fa.y+fb.y)/2); }
   g.restore();
 }
 function shade(hex,f){ const n=parseInt(hex.slice(1),16); const r=clamp(((n>>16)&255)*f,0,255),gg=clamp(((n>>8)&255)*f,0,255),b=clamp((n&255)*f,0,255); return `rgb(${r|0},${gg|0},${b|0})`; }
