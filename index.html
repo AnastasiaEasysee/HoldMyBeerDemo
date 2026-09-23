@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Hold My Beer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@600;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --stout:#241610; --amber:#f2a900; --amber-deep:#c97d00; --foam:#fff7e6;
+  --hop:#4f9d69; --spill:#e0453a;
+  --panel:#fff7e6; --ink:#241610; --muted:#7a6149;
+  --hud:rgba(36,22,16,.72); --hud-ink:#fff7e6;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){ --panel:#33231a; --ink:#fff1d6; --muted:#d2b594; }
+}
+:root[data-theme="dark"]{ --panel:#33231a; --ink:#fff1d6; --muted:#d2b594; }
+*,*::before,*::after{box-sizing:inherit}
+html,body{height:100%;margin:0;background:var(--stout);overflow:hidden;
+  font-family:Nunito,"Trebuchet MS",system-ui,sans-serif;
+  touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+
+/* ---------- HUD ---------- */
+.hud{position:fixed;inset:0;pointer-events:none;display:none}
+.hud.on{display:block}
+.beers{position:absolute;left:calc(12px + env(safe-area-inset-left,0px));top:calc(10px + env(safe-area-inset-top,0px));
+  background:var(--hud);color:var(--hud-ink);border-radius:14px;padding:6px 12px 8px;min-width:96px}
+.beers .n{font-family:Bungee,Impact,sans-serif;font-size:28px;line-height:1.1}
+.drunk{height:6px;border-radius:3px;background:rgba(255,255,255,.18);margin-top:4px;overflow:hidden}
+.drunk i{display:block;height:100%;width:0;background:linear-gradient(90deg,#b98cff,#ff5fa2)}
+.drunk-l{font-size:11px;opacity:.8}
+.top{position:absolute;left:50%;top:calc(10px + env(safe-area-inset-top,0px));transform:translateX(-50%);
+  width:min(340px,46vw);display:flex;flex-direction:column;gap:8px;align-items:stretch}
+.timer{height:14px;border-radius:7px;background:var(--hud);overflow:hidden;position:relative}
+.timer i{position:absolute;left:0;top:0;bottom:0;width:100%;background:var(--amber);transition:background .3s}
+.timer b{position:absolute;inset:0;text-align:center;font:800 11px/14px Nunito,sans-serif;color:var(--stout)}
+/* the balance meter is a spirit level; the bubble is a beer bubble */
+.level{height:34px;border-radius:17px;background:var(--hud);position:relative;overflow:hidden;
+  box-shadow:inset 0 0 0 2px rgba(255,247,230,.25)}
+.level .danger{position:absolute;inset:4px;border-radius:13px;
+  background:linear-gradient(90deg,var(--spill),#7a2a20 30%,#7a2a20 70%,var(--spill))}
+.level .safe{position:absolute;top:4px;bottom:4px;left:50%;transform:translateX(-50%);
+  background:var(--hop);border-radius:13px;transition:width .25s}
+.level .bubble{position:absolute;top:50%;width:24px;height:24px;border-radius:50%;
+  transform:translate(-50%,-50%);background:radial-gradient(circle at 35% 35%,#fff,var(--foam) 45%,var(--amber) 100%);
+  box-shadow:0 0 0 2px var(--stout)}
+.level.bad .bubble{background:radial-gradient(circle at 35% 35%,#fff,#ffd0c9 45%,var(--spill) 100%)}
+.progress{position:absolute;right:calc(12px + env(safe-area-inset-right,0px));top:calc(10px + env(safe-area-inset-top,0px));
+  background:var(--hud);color:var(--hud-ink);border-radius:14px;padding:6px 12px;width:min(170px,22vw);font-size:12px}
+.progress .bar{height:6px;border-radius:3px;background:rgba(255,255,255,.2);margin:5px 0 2px;position:relative}
+.progress .bar i{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--amber);border-radius:3px}
+.progress .ends{display:flex;justify-content:space-between}
+
+@media (orientation:portrait){
+  .beers{display:grid;grid-template-columns:auto auto;column-gap:10px;align-items:center;min-width:0;padding:6px 12px}
+  .beers .n{grid-row:1/3;font-size:24px}
+  .beers .drunk{width:80px;margin-top:2px}
+  .top{left:calc(12px + env(safe-area-inset-left,0px));right:calc(12px + env(safe-area-inset-right,0px));width:auto;transform:none;
+    top:calc(68px + env(safe-area-inset-top,0px))}
+  .progress{width:min(170px,42vw)}
+}
+/* controls: sized for thumbs; drink button sits on top of the balance stick */
+:root{--stick:clamp(116px,34vmin,156px);--btn:clamp(72px,21vmin,96px);--edge:max(16px,env(safe-area-inset-left,0px));
+  --edgeR:max(16px,env(safe-area-inset-right,0px));--low:calc(14px + env(safe-area-inset-bottom,0px))}
+.stick{position:fixed;bottom:var(--low);width:var(--stick);height:var(--stick);border-radius:50%;
+  background:rgba(36,22,16,.45);box-shadow:inset 0 0 0 3px rgba(255,247,230,.35);pointer-events:auto;touch-action:none;display:none}
+.stick.on{display:block}
+.stick .knob{position:absolute;left:50%;top:50%;width:42%;height:42%;border-radius:50%;transform:translate(-50%,-50%);
+  background:var(--foam);box-shadow:0 3px 0 var(--amber-deep);pointer-events:none}
+.stick span{position:absolute;left:0;right:0;bottom:9%;text-align:center;color:var(--foam);font-size:11px;font-weight:800;opacity:.75;pointer-events:none}
+#stickR{right:var(--edgeR)}
+#stickL{left:var(--edge)}
+#drink{position:fixed;left:calc(var(--edge) + 4px);bottom:calc(var(--low) + 6px);
+  width:calc(var(--btn) * 1.1);height:calc(var(--btn) * 1.1);border-radius:50%;border:0;pointer-events:auto;touch-action:none;display:none;
+  background:var(--amber);color:var(--stout);font:800 13px/1.1 Nunito,sans-serif;box-shadow:0 5px 0 var(--amber-deep);
+  -webkit-tap-highlight-color:transparent}
+#drink.on{display:block}
+#drink.pressed,#drink:active{transform:translateY(3px);box-shadow:0 2px 0 var(--amber-deep)}
+#drink[disabled]{opacity:.45}
+#drink .e{font-size:calc(var(--btn) * .34);display:block}
+/* balance stick present: drink button centred directly above it */
+#drink.withStick{width:var(--btn);height:var(--btn);
+  left:calc(var(--edge) + (var(--stick) - var(--btn)) / 2);bottom:calc(var(--low) + var(--stick) + 12px)}
+@media (max-height:360px){ #drink.withStick{bottom:calc(var(--low) + var(--stick) + 6px)} }
+
+/* overlays */
+.overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;padding:16px;
+  background:rgba(36,22,16,.55);overflow:auto;touch-action:pan-y}
+.overlay.on{display:flex}
+.card{background:var(--panel);color:var(--ink);border-radius:22px;padding:22px 24px;max-width:640px;width:100%;
+  max-height:100%;overflow:auto;box-shadow:0 12px 0 rgba(0,0,0,.25)}
+h1{font-family:Bungee,Impact,sans-serif;font-weight:400;font-size:clamp(30px,6vw,46px);line-height:1;margin:0 0 4px;color:var(--amber-deep)}
+h2{font-family:Bungee,Impact,sans-serif;font-weight:400;font-size:clamp(24px,4.5vw,34px);margin:0 0 10px;line-height:1.05}
+.lead{margin:0 0 14px;color:var(--muted);font-size:15px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:6px 22px;font-size:14px;line-height:1.4}
+@media (max-width:560px){.cols{grid-template-columns:1fr}}
+.cols p{margin:0 0 8px}
+.cols strong{color:var(--ink)}
+.pick{display:flex;align-items:center;gap:14px;margin:12px 0 6px;flex-wrap:wrap}
+.step{display:flex;align-items:center;background:var(--stout);border-radius:14px;padding:4px}
+.step button{width:44px;height:44px;border:0;border-radius:10px;background:var(--amber);color:var(--stout);
+  font:400 24px Bungee,sans-serif;cursor:pointer}
+.step output{min-width:64px;text-align:center;color:var(--foam);font:400 26px Bungee,sans-serif}
+.mini{flex:1;min-width:160px;font-size:12px;color:var(--muted)}
+.mini .level{height:22px;margin-top:4px}
+.mini .level .danger,.mini .level .safe{top:3px;bottom:3px}
+.opts{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin:8px 0 14px}
+.opts label{display:flex;align-items:center;gap:6px;cursor:pointer}
+.go{width:100%;border:0;border-radius:16px;padding:15px;background:var(--amber);color:var(--stout);
+  font:400 20px Bungee,Impact,sans-serif;cursor:pointer;box-shadow:0 5px 0 var(--amber-deep)}
+.go:active{transform:translateY(3px);box-shadow:0 2px 0 var(--amber-deep)}
+button:focus-visible,input:focus-visible{outline:3px solid #6fb3ff;outline-offset:2px}
+.count{font-family:Bungee,Impact,sans-serif;font-size:min(34vh,200px);color:var(--foam);
+  text-shadow:0 8px 0 var(--amber-deep);pointer-events:none}
+#countdown{background:transparent;pointer-events:none}
+table{width:100%;border-collapse:collapse;font-size:15px;margin:6px 0 16px}
+td{padding:6px 0;border-bottom:1px dashed rgba(122,97,73,.35)}
+td:last-child{text-align:right;font-weight:800}
+tr.total td{border-bottom:0;font-family:Bungee,sans-serif;font-weight:400;font-size:22px;padding-top:10px}
+.best{font-size:13px;color:var(--muted);margin:-8px 0 14px}
+@media (max-height:500px){
+  .overlay{padding:8px max(10px,env(safe-area-inset-right,0px)) 8px max(10px,env(safe-area-inset-left,0px))}
+  .card{padding:14px 18px 0;border-radius:16px}
+  h1{font-size:28px} .lead{font-size:13px;margin-bottom:8px}
+  .cols{font-size:12.5px;line-height:1.35} .cols p{margin-bottom:5px}
+  .pick{margin:6px 0 2px} .opts{margin:4px 0 8px}
+  table{font-size:13px} td{padding:4px 0}
+}
+@media (pointer:coarse){.kbd{display:none}}
+@media (max-width:430px){.card{padding:16px 16px 0} h1{font-size:30px} .lead{font-size:14px;margin-bottom:10px} .cols{font-size:13px;line-height:1.35} .cols p{margin-bottom:6px}}
+.tilt{border-radius:14px;padding:10px 12px;margin:8px 0 4px;background:rgba(122,97,73,.12)}
+.tiltHead{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px}
+.tilt p{margin:4px 0 6px;font-size:12.5px;color:var(--muted)}
+.tilt[data-status="ok"]{background:rgba(79,157,105,.18)}
+.tilt[data-status="silent"],.tilt[data-status="blocked"],.tilt[data-status="denied"]{background:rgba(224,69,58,.14)}
+.tiltLive{height:20px}.tiltLive .danger,.tiltLive .safe{top:3px;bottom:3px}.tiltLive .bubble{width:16px;height:16px}
+.tilt:not([data-status="ok"]) .tiltLive{display:none}
+.small{border:0;border-radius:10px;padding:8px 12px;background:var(--amber);color:var(--stout);font:800 13px Nunito,sans-serif;cursor:pointer}
+.card .go{position:sticky;bottom:0;margin-bottom:14px}
+.card::after{content:"";display:block;height:1px}
+#rotateGate{background:rgba(36,22,16,.92);color:var(--foam);text-align:center;flex-direction:column;gap:10px;z-index:5}
+#rotateGate .ph{font-size:64px;animation:turn 1.6s ease-in-out infinite}
+@keyframes turn{0%,30%{transform:rotate(0)}60%,100%{transform:rotate(-90deg)}}
+@media (prefers-reduced-motion:reduce){#rotateGate .ph{animation:none}}
+.rotate{display:none;margin:0 0 12px;padding:8px 12px;border-radius:10px;background:rgba(242,169,0,.18);font-size:13px}
+@media (orientation:portrait) and (pointer:coarse){.rotate{display:block}}
+@media (prefers-reduced-motion:reduce){.level .safe,.timer i{transition:none}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="hud" id="hud">
+  <div class="beers"><div class="n" id="beerN">🍺 0</div><div class="drunk-l">Drunkenness</div><div class="drunk"><i id="drunkBar"></i></div></div>
+  <div class="top">
+    <div class="timer"><i id="timeBar"></i><b id="timeTxt">80s</b></div>
+    <div class="level" id="level"><div class="danger"></div><div class="safe" id="safe"></div><div class="bubble" id="bubble"></div></div>
+  </div>
+  <div class="progress"><div class="ends"><span>Kitchen</span><span>Couch</span></div><div class="bar"><i id="progBar"></i></div></div>
+</div>
+<div class="stick" id="stickL"><span>Balance</span><div class="knob"></div></div>
+<div class="stick" id="stickR"><span>Move / speed</span><div class="knob"></div></div>
+<button id="drink" aria-label="Drink a beer"><span class="e">🍺</span>Drink</button>
+
+<div class="overlay on" id="tutorial">
+  <div class="card">
+    <h1>Hold My Beer</h1>
+    <p class="lead">Grab beers from the fridge and race to the living room couch without spilling them.</p>
+    <div class="cols">
+      <div>
+        <p><strong>You always run forward.</strong> The right stick steers left and right; push it up to go faster and down to slow down.</p>
+        <p><strong>Keep your tray level.</strong> Tilt your phone to keep the bubble in the green. In the red, beer spills. Hit the edge and you lose everything.</p>
+        <p><strong>No tilt sensor?</strong> A balance stick appears on the left instead.</p>
+      </div>
+      <div>
+        <p><strong>Dodge the clutter.</strong> Crashing bounces you back and knocks a beer loose. It slides away and can be picked up again after 3 seconds.</p>
+        <p><strong>Drink a beer</strong> for a speed boost and a few seconds of smashing straight through things. You'll get drunker, and drunk trays wobble a lot more.</p>
+        <p class="kbd"><strong>Keyboard:</strong> arrow keys move, A and D balance, space drinks.</p>
+      </div>
+    </div>
+    <div class="pick">
+      <div class="step"><button id="minus" aria-label="Fewer beers">−</button><output id="startN">5</output><button id="plus" aria-label="More beers">+</button></div>
+      <div class="mini">Beers to start with. More beers score more points but shrink your safe zone.
+        <div class="level"><div class="danger"></div><div class="safe" id="previewSafe"></div></div></div>
+    </div>
+    <div class="tilt" id="tiltRow" data-status="idle">
+      <div class="tiltHead"><strong>Tilt sensor</strong><button id="tiltBtn" class="small">Enable tilt</button></div>
+      <p id="tiltStatus"></p>
+      <div class="level tiltLive"><div class="danger"></div><div class="safe" style="width:40%"></div><div class="bubble" id="tiltBubble"></div></div>
+    </div>
+    <div class="opts">
+      <label><input type="checkbox" id="optStick"> Use the balance stick instead of tilting</label>
+      <label><input type="checkbox" id="optInvert"> Invert tilt direction</label>
+    </div>
+    <button class="go" id="understand">I understand</button>
+  </div>
+</div>
+
+<div class="overlay" id="rotateGate" role="alert">
+  <div class="ph">📱</div>
+  <h2 id="gateTitle">Turn your phone upright</h2>
+  <p id="gateTxt" style="margin:0;opacity:.8">The game is paused and carries on in portrait.</p>
+</div>
+<div class="overlay" id="countdown"><div class="count" id="countTxt">3</div></div>
+
+<div class="overlay" id="results">
+  <div class="card">
+    <h2 id="resTitle">Made it to the couch</h2>
+    <table id="resTable"></table>
+    <p class="best" id="best"></p>
+    <button class="go" id="again">Run again</button>
+  </div>
+</div>
+
+<script>
+/* =====================================================================
+   TWEAKABLE VALUES — change anything here
+   ===================================================================== */
+const CONFIG = {
+  LANES: 6,                  // number of lanes
+  LANE_WIDTH_M: 1.3,
+  TRACK_LENGTH: 450,         // metres from fridge to couch
+  TIME_LIMIT: 80,            // seconds; not reaching the couch in time = lose
+
+  BASE_SPEED: 9,             // m/s with the stick centred
+  MIN_SPEED: 4.5,            // stick pulled down (never stops: always moving forward)
+  MAX_SPEED: 13,             // stick pushed up
+  ACCEL: 8,
+  STRAFE_SPEED: 4.5,         // lanes per second
+
+  OBSTACLE_DEPTH: 0.8,
+  BOUNCE_SPEED: 7,           // how hard you bounce back off an obstacle
+  STUN_TIME: 0.5,
+  HIT_COOLDOWN: 0.8,
+  BEERS_DROPPED_ON_HIT: 1,
+  DROPPED_PICKUP_DELAY: 3,   // seconds before a dropped beer can be picked up
+  DROPPED_SLIDE_FRICTION: 3,
+
+  SAFE_ZONE_BASE: 0.6,       // half-width of the safe zone with 0 beers (meter runs -1..1)
+  SAFE_ZONE_PER_BEER: 0.035, // shrink per carried beer
+  SAFE_ZONE_MIN: 0.12,       // never smaller than this
+  SPILL_RATE: 1.4,           // beers per second spilled at the very edge of the danger zone
+
+  BALANCE_CONTROL: 5,        // how strongly your input moves the tray
+  BALANCE_DAMPING: 3,
+  INSTABILITY_SOBER: 0.4,    // tendency to keep tipping once off-centre
+  INSTABILITY_DRUNK: 2.2,
+  TILT_INTERVAL_SOBER: 9,    // seconds between random tilts
+  TILT_INTERVAL_DRUNK: 0.9,
+  TILT_FORCE_SOBER: 0.25,
+  TILT_FORCE_DRUNK: 3.0,
+  GYRO_RANGE_DEG: 25,        // phone tilt for full input
+  GYRO_INVERT: false,
+
+  START_BEERS: 5,
+  DRINK_BOOST_MULT: 1.5,
+  DRINK_BOOST_TIME: 3,       // speed boost + invulnerability duration
+  DRINK_DRUNK_GAIN: 0.22,    // drunkenness per beer (0..1)
+  SOBER_RATE: 0.025,         // drunkenness lost per second
+
+  POINTS_PER_BEER: 5,
+  FIRST_PLACE_POINTS: 100,   // single player: full points for beating par time
+  PAR_TIME: 45,
+  POINTS_LOST_PER_SEC: 1,
+
+  PORTRAIT_VISIBLE_LANES: 4.5, // lanes across the screen in portrait (camera follows you)
+  PORTRAIT_PLAYER_Y: 0.66,     // where your feet sit, as a fraction of screen height
+  PORTRAIT_HORIZON_Y: 0.19,
+  CAMERA_BEHIND: 7,
+  CAMERA_HEIGHT: 3.2,
+  VIEW_DISTANCE: 75,
+};
+
+/* =====================================================================
+   FIXED MAP (same every run). Lanes are 0..5, z is metres from start.
+   S = static, E = extending/retracting, M = moving
+   ===================================================================== */
+const KINDS = {
+  box:{e:'📦',h:.7,c:'#b07a45'}, shoes:{e:'👟',h:.35,c:'#5b6b8c'}, toy:{e:'🧸',h:.6,c:'#c9794f'},
+  laundry:{e:'🧺',h:.75,c:'#d6c08c'}, plant:{e:'🪴',h:1.0,c:'#5f8f4e'}, chair:{e:'🪑',h:.95,c:'#8a5a3b'},
+  drawer:{e:'🗄️',h:.8,c:'#9aa3ad'}, board:{e:'👔',h:.85,c:'#7fa6c9'},
+  roomba:{e:'🤖',h:.3,c:'#3a3f47'}, cat:{e:'🐈',h:.45,c:'#e0a458'}, ball:{e:'⚽',h:.4,c:'#d9d9d9'},
+};
+const S_ = (z,lane,w,k)=>({z,t:'S',lane,w,k});
+const E_ = (z,lane,side,k,period=2.6,phase=0)=>({z,t:'E',lane,w:2,side,k,period,phase});
+const M_ = (z,k,speed=1.3,phase=0,min=0,max=6)=>({z,t:'M',min,max,w:1,speed,phase,k});
+const MAP = [
+  S_(25,2,2,'box'),
+  S_(37,0,1,'shoes'), S_(37,5,1,'plant'),
+  M_(50,'roomba',1.2),
+  S_(62,1,2,'laundry'), S_(62,4,1,'toy'),
+  E_(75,0,'L','drawer'), E_(75,5,'R','drawer',2.6,Math.PI),
+  S_(88,3,1,'chair'),
+  M_(100,'cat',1.6,.3,1,5),
+  S_(112,0,2,'box'), S_(112,4,2,'laundry'),
+  E_(125,2,'L','board',2.2),
+  S_(138,1,1,'toy'), S_(138,5,1,'shoes'),
+  M_(150,'ball',2.2,.5),
+  S_(162,2,2,'chair'),
+  E_(175,0,'L','drawer',2.4), E_(175,5,'R','drawer',2.4,1.5),
+  S_(188,3,1,'plant'), S_(188,0,1,'box'),
+  M_(200,'roomba',1.3,0), M_(206,'roomba',1.3,.5),
+  S_(218,1,2,'laundry'), S_(218,5,1,'toy'),
+  E_(230,3,'L','board',2.0),
+  S_(242,0,1,'shoes'), S_(242,2,1,'box'), S_(242,4,2,'chair'),
+  M_(254,'cat',2.0,.7),
+  S_(266,2,2,'box'),
+  E_(278,0,'L','drawer',2.0), E_(278,5,'R','drawer',2.0,Math.PI),
+  M_(290,'ball',2.4,.2,1,5),
+  S_(302,0,2,'laundry'), S_(302,3,1,'plant'),
+  S_(315,5,1,'toy'), E_(315,2,'L','board',1.8),
+  M_(328,'roomba',1.5,.1), M_(334,'cat',1.8,.6),
+  S_(346,1,1,'shoes'), S_(346,3,2,'box'),
+  E_(358,0,'L','drawer',1.8,1), E_(358,5,'R','drawer',1.8,2.5),
+  S_(370,2,2,'chair'),
+  M_(382,'roomba',1.8,.4),
+  S_(394,0,1,'toy'), S_(394,2,1,'plant'), S_(394,4,1,'shoes'),
+  E_(406,1,'L','board',1.7), E_(406,4,'L','board',1.7,Math.PI),
+  M_(418,'ball',2.6,.8),
+  S_(430,1,2,'laundry'), S_(430,4,2,'box'),
+];
+const FLOOR_BEER_LANES = [4,1,3,5,2,0,3,1,4,2,5,0,2,4,1,3,5,0,3,2,4,1,5,2,0,3,1,4,2,3];
+const FLOOR_BEERS = FLOOR_BEER_LANES.map((l,i)=>({z:31+i*13.3, x:l+0.5}));
+
+/* ===================================================================== */
+const C = CONFIG;
+const $ = id=>document.getElementById(id);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const safeZone = n => Math.max(C.SAFE_ZONE_MIN, C.SAFE_ZONE_BASE - n*C.SAFE_ZONE_PER_BEER);
+
+/* ---------- audio (synthesised, no files) ---------- */
+let AC=null;
+function audioInit(){ try{ AC = AC || new (window.AudioContext||window.webkitAudioContext)(); if(AC.state==='suspended') AC.resume(); }catch(e){ AC=null; } }
+function tone(f0,f1,dur,type='sine',vol=.2,delay=0){
+  if(!AC) return; const t=AC.currentTime+delay;
+  const o=AC.createOscillator(), g=AC.createGain(); o.type=type;
+  o.frequency.setValueAtTime(f0,t); if(f1) o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(vol,t+.01); g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+  o.connect(g); g.connect(AC.destination); o.start(t); o.stop(t+dur+.03);
+}
+function noise(dur,vol=.2,freq=800,delay=0){
+  if(!AC) return; const t=AC.currentTime+delay; const len=Math.floor(AC.sampleRate*dur);
+  const buf=AC.createBuffer(1,len,AC.sampleRate), d=buf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*(1-i/len);
+  const src=AC.createBufferSource(); src.buffer=buf; const f=AC.createBiquadFilter(); f.type='lowpass'; f.frequency.value=freq;
+  const g=AC.createGain(); g.gain.value=vol; src.connect(f); f.connect(g); g.connect(AC.destination); src.start(t);
+}
+const SFX = {
+  bounce(){ tone(170,55,.25,'sine',.5); noise(.12,.25,600); },
+  lose(){ tone(620,180,.35,'triangle',.25); },
+  spillAll(){ noise(.8,.35,1400); tone(420,70,.7,'sawtooth',.1); },
+  pickup(){ tone(880,0,.08,'sine',.22); tone(1320,0,.14,'sine',.22,.07); },
+  drink(){ for(let i=0;i<4;i++) tone(240,130,.09,'sine',.35,i*.13); tone(660,990,.3,'triangle',.12,.55); },
+  smash(){ noise(.22,.3,2200); tone(300,90,.2,'square',.08); },
+  finish(){ [523,659,784,1047,784,1047].forEach((f,i)=>tone(f,0,.22,'square',.1,i*.11)); },
+  fail(){ [392,330,262].forEach((f,i)=>tone(f,0,.3,'triangle',.18,i*.22)); },
+  beep(hi){ tone(hi?880:440,0,.16,'square',.13); },
+};
+
+/* ---------- input ---------- */
+const keys = new Set();
+addEventListener('keydown',e=>{ keys.add(e.key.toLowerCase()); if(e.key===' '||e.key.toLowerCase()==='e'){ drink(); } if(e.key.startsWith('Arrow')||e.key===' ') e.preventDefault(); });
+addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
+function makeStick(el){
+  const knob=el.querySelector('.knob'); const st={x:0,y:0,id:null};
+  const moveTo=e=>{ const r=el.getBoundingClientRect(); let dx=e.clientX-(r.left+r.width/2), dy=e.clientY-(r.top+r.height/2);
+    const R=r.width*.36, d=Math.hypot(dx,dy); if(d>R){dx*=R/d;dy*=R/d;}
+    st.x=dx/R; st.y=-dy/R; knob.style.transform=`translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`; };
+  const end=e=>{ if(e.pointerId!==st.id) return; st.id=null; st.x=0; st.y=0; knob.style.transform='translate(-50%,-50%)'; };
+  el.addEventListener('pointerdown',e=>{ st.id=e.pointerId; try{el.setPointerCapture(e.pointerId);}catch(_){} moveTo(e); e.preventDefault(); });
+  el.addEventListener('pointermove',e=>{ if(e.pointerId===st.id) moveTo(e); });
+  ['pointerup','pointercancel','lostpointercapture'].forEach(n=>el.addEventListener(n,end));
+  return st;
+}
+const stickL=makeStick($('stickL')), stickR=makeStick($('stickR'));
+const dz = v => Math.abs(v)<.12?0:v;
+document.addEventListener('touchmove',e=>{ if(!e.target.closest('.overlay')) e.preventDefault(); },{passive:false});
+
+/* tilt sensor
+   Reads gravity from devicemotion (works when the phone is held upright) and
+   falls back to deviceorientation. Roll = how far the right edge is dipped. */
+const gyro={available:false, raw:0, base:0, listening:false, status:'idle', lastT:0, lastMotion:0, ySign:0};
+const RAD=180/Math.PI;
+function rollFromUp(ux,uy,uz){ return Math.atan2(-ux, Math.hypot(uy,uz))*RAD; }
+function feed(v){
+  if(!isFinite(v)) return;
+  gyro.raw = gyro.available ? gyro.raw+(v-gyro.raw)*.35 : v;
+  gyro.available=true; gyro.lastT=performance.now();
+  if(gyro.status!=='ok'){ gyro.status='ok'; updTilt(); }
+}
+function onMotion(e){
+  const g=e.accelerationIncludingGravity; if(!g||g.x==null||g.y==null) return;
+  // spec: upright phone gives y≈+9.8 (up vector). Some browsers report the opposite sign; learn it once.
+  if(!gyro.ySign && Math.abs(g.y)>5) gyro.ySign=g.y>0?1:-1;
+  const k=gyro.ySign||1;
+  gyro.lastMotion=performance.now();
+  feed(rollFromUp(g.x*k,g.y*k,(g.z||0)*k));
+}
+function onOrient(e){
+  if(e.beta==null||e.gamma==null) return;
+  if(performance.now()-gyro.lastMotion<500) return; // motion data is better when available
+  const b=e.beta/RAD, c=e.gamma/RAD;
+  // down vector in device coords = (cosβ·sinγ, −sinβ, −cosβ·cosγ); up = −down
+  feed(rollFromUp(-Math.cos(b)*Math.sin(c), Math.sin(b), Math.cos(b)*Math.cos(c)));
+}
+function enableGyro(){
+  if(gyro.listening||gyro.status==='asking') return;
+  if(!('DeviceMotionEvent' in window) && !('DeviceOrientationEvent' in window)){ gyro.status='unsupported'; updTilt(); return; }
+  const listen=()=>{
+    gyro.listening=true; if(!gyro.available) gyro.status='waiting'; updTilt();
+    addEventListener('devicemotion',onMotion); addEventListener('deviceorientation',onOrient);
+    setTimeout(()=>{ if(!gyro.available){ gyro.status='silent'; updTilt(); } },2000);
+  };
+  const asks=[];
+  try{
+    if(window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission==='function') asks.push(DeviceMotionEvent.requestPermission());
+    if(window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission==='function') asks.push(DeviceOrientationEvent.requestPermission());
+  }catch(e){}
+  if(!asks.length){ listen(); return; }
+  gyro.status='asking'; updTilt();
+  Promise.allSettled(asks).then(rs=>{
+    if(rs.some(r=>r.status==='fulfilled'&&r.value==='granted')) listen();
+    else { gyro.status = rs.some(r=>r.status==='rejected') ? 'blocked' : 'denied'; updTilt(); }
+  });
+}
+const inFrame=(()=>{ try{ return window.self!==window.top; }catch(e){ return true; } })();
+function updTilt(){
+  const el=$('tiltStatus'); if(!el) return;
+  const where = !window.isSecureContext ? 'The page has to be opened over https for tilt to work.'
+    : inFrame ? 'The game is running inside another page that isn\u2019t passing motion data through. Open the game on its own in Safari or Chrome (for example hosted on GitHub Pages) and tilt will work.'
+    : 'This browser isn\u2019t providing motion data.';
+  const msg={
+    idle:'Tap \u201cEnable tilt\u201d to use your phone\u2019s motion sensor.',
+    asking:'Allow motion access in the prompt that appears.',
+    waiting:'Waiting for readings\u2026',
+    ok:'Working. Tilt your phone left and right and watch the bubble.',
+    denied:'Motion access was refused, so the balance stick will be used. On iPhone, close and reopen Safari to be asked again.',
+    blocked:'Motion access is blocked here, so the balance stick will be used. '+where,
+    silent:'No tilt readings are coming in, so the balance stick will be used. '+where,
+    unsupported:'This device has no tilt sensor, so the balance stick will be used.',
+  }[gyro.status];
+  el.textContent=msg;
+  $('tiltRow').dataset.status=gyro.status;
+  $('tiltBtn').style.display=(gyro.status==='idle'||gyro.status==='denied'||gyro.status==='blocked')?'':'none';
+  $('tiltBtn').textContent=gyro.status==='idle'?'Enable tilt':'Try again';
+}
+let useGyro=false, invertGyro=C.GYRO_INVERT;
+function syncBalanceMode(){
+  const live=gyro.available && performance.now()-gyro.lastT<1000 && !$('optStick').checked;
+  if(live===useGyro) return;
+  if(live && useGyro===false) gyro.base=gyro.raw;
+  useGyro=live; show('stickL',!live); $('drink').classList.toggle('withStick',!live);
+}
+
+function readInput(){
+  const k=n=>keys.has(n)?1:0;
+  const mx=clamp(dz(stickR.x)+k('arrowright')-k('arrowleft'),-1,1);
+  const my=clamp(dz(stickR.y)+k('arrowup')-k('arrowdown'),-1,1);
+  let bal = k('d')-k('a');
+  if(useGyro){ let g=(gyro.raw-gyro.base)/C.GYRO_RANGE_DEG; if(invertGyro) g=-g; if(Math.abs(g)<.04) g=0; bal+=g; }
+  else bal+=stickL.x;
+  return {mx,my,bal:clamp(bal,-1,1)};
+}
+
+/* ---------- game state ---------- */
+let S=null, state='tutorial', startBeers=C.START_BEERS;
+function newRun(){
+  S={ t:0, z:0, x:C.LANES/2, vz:C.BASE_SPEED*.4, beers:startBeers, b:0, bv:0, spill:0, drunk:0,
+      boost:0, stun:0, hitCd:0, tilt:null, tiltTimer:C.TILT_INTERVAL_SOBER*(.6+.8*Math.random()),
+      obstacles:MAP.map(o=>({...o, knocked:-1})), floor:FLOOR_BEERS.map(b=>({...b, taken:false})),
+      dropped:[], pops:[], finished:false, camX:C.LANES/2 };
+}
+function pop(text,color='#fff7e6'){ S.pops.push({text,color,t:S.t}); }
+
+function obsSpan(o,t){
+  if(o.t==='S') return [o.lane,o.lane+o.w];
+  if(o.t==='E'){ const k=.5-.5*Math.cos(t/o.period*2*Math.PI+o.phase); const w=.25+(o.w-.25)*k;
+    return o.side==='R'?[o.lane+1-w,o.lane+1]:[o.lane,o.lane+w]; }
+  const range=o.max-o.min-o.w; const p=(((t*o.speed/range)+o.phase*2)%2+2)%2; const f=p<1?p:2-p;
+  const x0=o.min+f*range; return [x0,x0+o.w];
+}
+
+function drink(){
+  if(state!=='play'||!S||S.beers<=0) return;
+  S.beers--; S.boost=C.DRINK_BOOST_TIME; S.drunk=Math.min(1,S.drunk+C.DRINK_DRUNK_GAIN);
+  SFX.drink(); pop('Glug! 💨','#ffd35a');
+}
+$('drink').addEventListener('pointerdown',e=>{ e.preventDefault(); $('drink').classList.add('pressed'); drink(); navigator.vibrate&&navigator.vibrate(20); });
+['pointerup','pointercancel','pointerleave'].forEach(n=>$('drink').addEventListener(n,()=>$('drink').classList.remove('pressed')));
+addEventListener('contextmenu',e=>e.preventDefault());
+['gesturestart','gesturechange','dblclick'].forEach(n=>document.addEventListener(n,e=>e.preventDefault(),{passive:false}));
+
+function dropBeers(n){
+  for(let i=0;i<n && S.beers>0;i++){
+    S.beers--;
+    S.dropped.push({z:S.z+.5, x:S.x, vz:Math.max(4,S.vzBeforeHit||C.BASE_SPEED)*(.8+.4*Math.random()),
+                    vx:(Math.random()-.5)*2.2, t0:S.t});
+  }
+}
+
+function update(dt){
+  S.t+=dt;
+  const inp=readInput();
+  // movement
+  S.x=clamp(S.x+inp.mx*C.STRAFE_SPEED*dt,.35,C.LANES-.35);
+  let target = inp.my>=0 ? C.BASE_SPEED+inp.my*(C.MAX_SPEED-C.BASE_SPEED) : C.BASE_SPEED+inp.my*(C.BASE_SPEED-C.MIN_SPEED);
+  if(S.boost>0) target*=C.DRINK_BOOST_MULT;
+  if(S.stun>0) target=0;
+  const rate = S.vz<target ? C.ACCEL : C.ACCEL*2.5;
+  S.vz+=clamp(target-S.vz,-rate*dt,rate*dt);
+  S.z+=S.vz*dt;
+  S.boost=Math.max(0,S.boost-dt); S.stun=Math.max(0,S.stun-dt); S.hitCd=Math.max(0,S.hitCd-dt);
+  S.drunk=Math.max(0,S.drunk-C.SOBER_RATE*dt);
+
+  // balance
+  const d=S.drunk;
+  S.tiltTimer-=dt;
+  if(S.tiltTimer<=0){
+    const F=lerp(C.TILT_FORCE_SOBER,C.TILT_FORCE_DRUNK,d);
+    S.tilt={f:(Math.random()<.5?-1:1)*F*(.6+.4*Math.random()), r:.4+.7*Math.random()};
+    S.tiltTimer=lerp(C.TILT_INTERVAL_SOBER,C.TILT_INTERVAL_DRUNK,d)*(.6+.8*Math.random());
+  }
+  let force=(.12*Math.sin(S.t*1.7)+.08*Math.sin(S.t*2.9+1))*(1+3*d);
+  if(S.tilt){ force+=S.tilt.f; S.tilt.r-=dt; if(S.tilt.r<=0) S.tilt=null; }
+  force+=S.b*lerp(C.INSTABILITY_SOBER,C.INSTABILITY_DRUNK,d);
+  force+=inp.bal*C.BALANCE_CONTROL;
+  S.bv+=force*dt; S.bv*=Math.exp(-C.BALANCE_DAMPING*dt); S.b+=S.bv*dt;
+  const safe=safeZone(S.beers), ab=Math.abs(S.b);
+  if(ab>=1){
+    if(S.beers>0){ S.beers=0; SFX.spillAll(); pop('Spilled everything!','#ff8a7a'); navigator.vibrate&&navigator.vibrate(250); }
+    S.b=0; S.bv=0; S.spill=0;
+  } else if(ab>safe && S.beers>0){
+    S.spill+=(ab-safe)/(1-safe)*C.SPILL_RATE*dt;
+    while(S.spill>=1 && S.beers>0){ S.spill-=1; S.beers--; SFX.lose(); pop('−1 🍺 spilled','#ff8a7a'); }
+  } else S.spill=Math.max(0,S.spill-dt*.5);
+
+  // obstacles
+  for(const o of S.obstacles){
+    if(o.knocked>=0) continue;
+    if(S.z+.3<o.z || S.z-.3>o.z+C.OBSTACLE_DEPTH) continue;
+    const [a,b]=obsSpan(o,S.t);
+    if(S.x+.3<a || S.x-.3>b) continue;
+    if(S.boost>0){ o.knocked=S.t; SFX.smash(); pop('Smash!','#ffd35a'); continue; }
+    if(S.hitCd>0) continue;
+    S.vzBeforeHit=S.vz; S.vz=-C.BOUNCE_SPEED; S.stun=C.STUN_TIME; S.hitCd=C.HIT_COOLDOWN;
+    S.z=Math.min(S.z,o.z-.35);
+    S.bv+=(Math.random()<.5?-1:1)*2.2;
+    SFX.bounce(); navigator.vibrate&&navigator.vibrate(80);
+    if(S.beers>0){ dropBeers(C.BEERS_DROPPED_ON_HIT); SFX.lose(); pop('−'+C.BEERS_DROPPED_ON_HIT+' 🍺 dropped','#ff8a7a'); }
+  }
+  // floor beers
+  for(const b of S.floor){
+    if(b.taken) continue;
+    if(Math.abs(b.z-S.z)<.7 && Math.abs(b.x-S.x)<.55){ b.taken=true; S.beers++; SFX.pickup(); pop('+1 🍺','#b8f5c6'); }
+  }
+  // dropped beers slide, then become collectable
+  for(let i=S.dropped.length-1;i>=0;i--){
+    const b=S.dropped[i];
+    const sp=Math.hypot(b.vz,b.vx);
+    if(sp>0){ const ns=Math.max(0,sp-C.DROPPED_SLIDE_FRICTION*dt); b.vz*=ns/sp; b.vx*=ns/sp; }
+    b.z+=b.vz*dt; b.x=clamp(b.x+b.vx*dt,.3,C.LANES-.3);
+    if(S.t-b.t0>=C.DROPPED_PICKUP_DELAY && Math.abs(b.z-S.z)<.7 && Math.abs(b.x-S.x)<.55){
+      S.dropped.splice(i,1); S.beers++; SFX.pickup(); pop('+1 🍺','#b8f5c6');
+    }
+  }
+  S.pops=S.pops.filter(p=>S.t-p.t<1.1);
+
+  if(S.z>=C.TRACK_LENGTH) endRun(true);
+  else if(S.t>=C.TIME_LIMIT) endRun(false);
+}
+
+/* ---------- rendering ---------- */
+const cv=$('c'), ctx=cv.getContext('2d');
+const off=document.createElement('canvas'), oc=off.getContext('2d');
+let W=0,H=0,DPR=1, focal=1, horizon=0, camH=C.CAMERA_HEIGHT, portrait=false, visLanes=C.LANES;
+function resize(){
+  DPR=Math.min(matchMedia('(pointer:coarse)').matches?1.5:2,window.devicePixelRatio||1); W=innerWidth; H=innerHeight;
+  for(const c of [cv,off]){ c.width=Math.round(W*DPR); c.height=Math.round(H*DPR); }
+  const B=C.CAMERA_BEHIND;
+  portrait=H>W*1.05;
+  if(portrait){
+    visLanes=Math.min(C.LANES,C.PORTRAIT_VISIBLE_LANES);
+    focal=.96*W*B/(visLanes*C.LANE_WIDTH_M);
+    const vmin=Math.min(W,H), stick=clamp(.34*vmin,116,156), btn=clamp(.21*vmin,72,96);
+    const feetY=Math.min(H*C.PORTRAIT_PLAYER_Y, H-(14+stick+12+btn)-16); // keep feet above the drink button
+    horizon=H*C.PORTRAIT_HORIZON_Y;
+    camH=(feetY-horizon)*B/focal;
+  } else {
+    visLanes=C.LANES; camH=C.CAMERA_HEIGHT;
+    const trackW=C.LANES*C.LANE_WIDTH_M;
+    const fitH=(.86*H-.22*H)*B/camH, fitW=.94*W*B/trackW;
+    focal=Math.min(fitH,fitW);
+    horizon=.86*H-camH*focal/B;
+  }
+}
+addEventListener('resize',resize); addEventListener('orientationchange',()=>setTimeout(resize,250)); resize();
+
+let camZ=0,camX=0;
+function P(xl,z){ const dz=z-camZ; if(dz<1) return null; const s=focal/dz;
+  return {x:W/2+(xl-camX)*C.LANE_WIDTH_M*s, y:horizon+camH*s, s}; }
+function quad(g,a,b,c,d,fill){ g.fillStyle=fill; g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.lineTo(c.x,c.y); g.lineTo(d.x,d.y); g.closePath(); g.fill(); }
+const up=(p,h)=>({x:p.x,y:p.y-h*p.s});
+
+function drawWorld(g){
+  g.setTransform(DPR,0,0,DPR,0,0);
+  const bg=g.createLinearGradient(0,0,0,H); bg.addColorStop(0,'#3b2a20'); bg.addColorStop(1,'#1e130d');
+  g.fillStyle=bg; g.fillRect(0,0,W,H);
+  const L=C.LANES, near=camZ+1.01, far=Math.min(camZ+C.VIEW_DISTANCE, C.TRACK_LENGTH+6), WALL=2.6;
+  // floor boards + walls, far to near
+  const step=2;
+  for(let z=Math.floor(far/step)*step; z>=Math.floor(near/step)*step; z-=step){
+    const z0=Math.max(z,near), z1=Math.min(z+step,far); if(z1<=z0) continue;
+    const a=P(0,z0),b=P(L,z0),c=P(L,z1),d=P(0,z1); if(!a||!d) continue;
+    const alt=Math.floor(z/step)%2===0;
+    const fog=clamp((z0-camZ)/C.VIEW_DISTANCE,0,1);
+    const fl=alt?[198,140,86]:[184,127,76], wl=alt?[233,214,178]:[222,201,163];
+    const mix=(col)=>`rgb(${col.map((v,i)=>Math.round(lerp(v,[59,42,32][i],fog*.85))).join(',')})`;
+    quad(g,a,b,c,d,mix(fl));
+    quad(g,a,d,up(d,WALL),up(a,WALL),mix(wl));
+    quad(g,b,c,up(c,WALL),up(b,WALL),mix(wl));
+    quad(g,a,d,up(d,.15),up(a,.15),mix([120,78,48]));
+    quad(g,b,c,up(c,.15),up(b,.15),mix([120,78,48]));
+  }
+  // lane lines
+  g.strokeStyle='rgba(255,247,230,.28)'; g.lineWidth=2;
+  for(let i=1;i<L;i++){ const a=P(i,near),b=P(i,far); if(!a||!b) continue; g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.stroke(); }
+  // start and finish
+  const band=(z,col,label)=>{ const a=P(0,z),b=P(L,z),c=P(L,z+1.2),d=P(0,z+1.2); if(!a||!c) return;
+    quad(g,a,b,c,d,col); g.fillStyle='#241610'; g.font=`400 ${Math.max(8,.55*a.s)}px Bungee, Impact, sans-serif`; g.textAlign='center'; g.textBaseline='middle';
+    g.fillText(label,(a.x+b.x)/2,(a.y+d.y)/2); };
+  band(2,'rgba(255,247,230,.6)','KITCHEN');
+  // drawables sorted far to near
+  const items=[];
+  for(const o of S.obstacles) if(o.z>camZ+1 && o.z<camZ+C.VIEW_DISTANCE) items.push({z:o.z,f:()=>drawObstacle(g,o)});
+  for(const b of S.floor) if(!b.taken && b.z>camZ+1.2 && b.z<camZ+C.VIEW_DISTANCE) items.push({z:b.z,f:()=>drawBeer(g,b.x,b.z,1)});
+  for(const b of S.dropped) if(b.z>camZ+1.2) items.push({z:b.z,f:()=>drawBeer(g,b.x,b.z,S.t-b.t0>=C.DROPPED_PICKUP_DELAY?1:(Math.sin(S.t*20)>0?.55:.25))});
+  if(C.TRACK_LENGTH<camZ+C.VIEW_DISTANCE+2) items.push({z:C.TRACK_LENGTH,f:()=>drawCouch(g)});
+  items.push({z:S.z,f:()=>drawPlayer(g)});
+  items.sort((a,b)=>b.z-a.z).forEach(i=>i.f());
+}
+
+function drawObstacle(g,o){
+  const K=KINDS[o.k]; let [x0,x1]=obsSpan(o,S.t); const z0=o.z, z1=o.z+C.OBSTACLE_DEPTH;
+  let h=K.h, lift=0, alpha=1;
+  if(o.knocked>=0){ const a=S.t-o.knocked; if(a>.6) return; lift=a*6; alpha=1-a/.6; }
+  const inset=.06; x0+=inset; x1-=inset;
+  const a=P(x0,z0),b=P(x1,z0),c=P(x1,z1),d=P(x0,z1); if(!a||!d) return;
+  g.save(); g.globalAlpha=alpha;
+  const L=(p,hh)=>({x:p.x,y:p.y-(hh+lift)*p.s});
+  // shadow
+  quad(g,a,b,c,d,'rgba(0,0,0,.22)');
+  quad(g,L(d,h),L(c,h),L(b,h),L(a,h),shade(K.c,1.18));
+  // side face towards camera centre
+  if(a.x>W/2) quad(g,L(a,0),L(d,0),L(d,h),L(a,h),shade(K.c,.72));
+  if(b.x<W/2) quad(g,L(b,0),L(c,0),L(c,h),L(b,h),shade(K.c,.72));
+  const fa=L(a,0), fb=L(b,h);
+  g.fillStyle=K.c; g.fillRect(fa.x,fb.y,fb.x-fa.x,fa.y-fb.y);
+  g.strokeStyle='rgba(36,22,16,.5)'; g.lineWidth=Math.max(1,a.s*.03); g.strokeRect(fa.x,fb.y,fb.x-fa.x,fa.y-fb.y);
+  // hazard stripe for moving / extending pieces
+  if(o.t!=='S'){ g.fillStyle=o.t==='M'?'rgba(242,169,0,.85)':'rgba(255,247,230,.7)'; g.fillRect(fa.x,fa.y-.08*a.s,fb.x-fa.x,.08*a.s); }
+  const size=Math.min((fa.y-fb.y)*1.1,(fb.x-fa.x)*.8,a.s*.9);
+  if(size>6){ g.font=`${size}px system-ui, "Apple Color Emoji","Segoe UI Emoji",sans-serif`; g.textAlign='center'; g.textBaseline='middle';
+    const n=Math.max(1,Math.round((x1-x0)/.95)); for(let i=0;i<n;i++) g.fillText(K.e, fa.x+(fb.x-fa.x)*(i+.5)/n, (fa.y+fb.y)/2); }
+  g.restore();
+}
+function shade(hex,f){ const n=parseInt(hex.slice(1),16); const r=clamp(((n>>16)&255)*f,0,255),gg=clamp(((n>>8)&255)*f,0,255),b=clamp((n&255)*f,0,255); return `rgb(${r|0},${gg|0},${b|0})`; }
+
+function drawBeer(g,x,z,alpha){
+  const p=P(x,z); if(!p) return; const s=p.s;
+  g.save(); g.globalAlpha=alpha;
+  const pulse=1+.12*Math.sin(S.t*6+z);
+  g.fillStyle='rgba(242,169,0,.35)'; g.beginPath(); g.ellipse(p.x,p.y,.32*s*pulse,.1*s*pulse,0,0,Math.PI*2); g.fill();
+  const bob=.06*Math.sin(S.t*4+z);
+  g.font=`${.5*s}px system-ui, "Apple Color Emoji","Segoe UI Emoji",sans-serif`; g.textAlign='center'; g.textBaseline='bottom';
+  g.fillText('🍺',p.x,p.y-(.05+bob)*s);
+  g.restore();
+}
+function drawCouch(g){
+  const z=C.TRACK_LENGTH, a=P(-.1,z), b=P(C.LANES+.1,z), c=P(C.LANES+.1,z+1.4), d=P(-.1,z+1.4); if(!a||!c) return;
+  const L=(p,h)=>({x:p.x,y:p.y-h*p.s});
+  quad(g,L(d,1.3),L(c,1.3),L(c,.5),L(d,.5),'#7a3b52');
+  quad(g,L(d,.5),L(c,.5),L(b,.5),L(a,.5),'#a35572');
+  g.fillStyle='#8f4763'; g.fillRect(a.x,L(a,.5).y,b.x-a.x,a.y-L(a,.5).y);
+  g.fillStyle='#fff7e6'; g.font=`400 ${Math.max(10,.7*a.s)}px Bungee, Impact, sans-serif`; g.textAlign='center'; g.textBaseline='middle';
+  g.fillText('🛋️ COUCH',(a.x+b.x)/2,L(d,1.7).y);
+}
+function drawPlayer(g){
+  const p=P(S.x,S.z); if(!p) return; const s=p.s; const {x,y}=p;
+  g.save();
+  g.fillStyle='rgba(0,0,0,.28)'; g.beginPath(); g.ellipse(x,y,.42*s,.12*s,0,0,Math.PI*2); g.fill();
+  if(S.stun>0 && Math.sin(S.t*40)>0) g.globalAlpha=.55;
+  if(S.boost>0){ g.shadowColor='#ffd35a'; g.shadowBlur=24; }
+  g.translate(x,y); g.rotate(S.b*.12);
+  const run=S.z*1.7, sw=Math.sin(run)*.22*s;
+  g.lineCap='round'; g.strokeStyle='#2d3a5a'; g.lineWidth=.14*s;
+  g.beginPath(); g.moveTo(-.1*s,-.8*s); g.lineTo(-.1*s+sw,-.02*s); g.moveTo(.1*s,-.8*s); g.lineTo(.1*s-sw,-.02*s); g.stroke();
+  g.fillStyle='#e8553d'; roundRect(g,-.24*s,-1.45*s,.48*s,.7*s,.1*s); g.fill();
+  // arm up to the tray
+  g.strokeStyle='#f2c29b'; g.lineWidth=.1*s;
+  g.beginPath(); g.moveTo(.2*s,-1.35*s); g.lineTo(.18*s+S.b*.15*s,-1.95*s); g.stroke();
+  g.beginPath(); g.moveTo(-.2*s,-1.35*s); g.lineTo(-.34*s-S.b*.1*s,-1.0*s); g.stroke();
+  const flush=Math.round(lerp(242,235,S.drunk)), gcol=Math.round(lerp(194,120,S.drunk));
+  g.fillStyle=`rgb(${flush},${gcol},${Math.round(lerp(155,120,S.drunk))})`;
+  g.beginPath(); g.arc(0,-1.66*s,.18*s,0,Math.PI*2); g.fill();
+  g.fillStyle='#4a2e1f'; g.beginPath(); g.arc(0,-1.7*s,.18*s,Math.PI*1.05,Math.PI*1.95); g.fill();
+  // tray + beers
+  g.save(); g.translate(.15*s,-2.0*s); g.rotate(S.b*.7);
+  g.shadowBlur=0;
+  const n=Math.min(S.beers,10), rowN=5, mw=.13*s, mh=.2*s;
+  for(let i=0;i<n;i++){
+    const row=Math.floor(i/rowN), col=i%rowN, cnt=Math.min(rowN,n-row*rowN);
+    const mx=(col-(cnt-1)/2)*(mw*1.3), my=-mh*(row+1)-row*.02*s;
+    g.fillStyle='#f2a900'; g.fillRect(mx-mw/2,my,mw,mh);
+    g.fillStyle='#fff7e6'; g.fillRect(mx-mw/2,my,mw,mh*.28);
+  }
+  g.fillStyle='#c9ced6'; roundRect(g,-.46*s,-.035*s,.92*s,.07*s,.03*s); g.fill();
+  if(S.beers>10){ g.fillStyle='#fff7e6'; g.font=`800 ${.22*s}px Nunito, sans-serif`; g.textAlign='center'; g.fillText('+'+(S.beers-10),0,-mh*2.4); }
+  g.restore();
+  g.restore();
+  // popups
+  g.textAlign='center'; g.textBaseline='middle';
+  S.pops.forEach((q,i)=>{ const age=S.t-q.t; g.globalAlpha=1-age/1.1; g.fillStyle=q.color;
+    g.font=`400 ${clamp(.32*s,14,30)}px Bungee, Impact, sans-serif`;
+    g.lineWidth=4; g.strokeStyle='rgba(36,22,16,.8)';
+    const ty=y-2.7*s-age*50-i*4; g.strokeText(q.text,x,ty); g.fillText(q.text,x,ty); });
+  g.globalAlpha=1;
+}
+function roundRect(g,x,y,w,h,r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+
+function render(){
+  camZ=S.z-C.CAMERA_BEHIND;
+  const half=visLanes/2-.3;
+  const want=portrait ? clamp(S.x,Math.min(C.LANES/2,half),Math.max(C.LANES/2,C.LANES-half)) : C.LANES/2+(S.x-C.LANES/2)*.35; S.camX+=(want-S.camX)*.12; camX=S.camX;
+  drawWorld(oc);
+  const d=S.drunk;
+  ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height);
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(d<.02){ ctx.drawImage(off,0,0); return; }
+  const k=reduce?.4:1;
+  const ang=Math.sin(S.t*1.3)*.05*d*k, sc=1+.08*d*k+.03*d*k*Math.sin(S.t*.9);
+  ctx.fillStyle='#241610'; ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.save(); ctx.translate(cv.width/2,cv.height/2); ctx.rotate(ang); ctx.scale(sc,sc); ctx.translate(-cv.width/2,-cv.height/2);
+  ctx.drawImage(off,0,0);
+  ctx.globalAlpha=.38*d; ctx.drawImage(off,Math.sin(S.t*2.1)*22*d*DPR*k,Math.cos(S.t*1.7)*8*d*DPR*k);
+  ctx.restore();
+  const vg=ctx.createRadialGradient(cv.width/2,cv.height/2,cv.height*.2,cv.width/2,cv.height/2,cv.width*.7);
+  vg.addColorStop(0,'rgba(120,40,160,0)'); vg.addColorStop(1,`rgba(120,40,160,${.45*d})`);
+  ctx.fillStyle=vg; ctx.fillRect(0,0,cv.width,cv.height);
+}
+
+/* ---------- HUD ---------- */
+let lastBeers=-1;
+function hud(){
+  if(S.beers!==lastBeers){ $('beerN').textContent='🍺 '+S.beers; lastBeers=S.beers; }
+  $('drunkBar').style.width=(S.drunk*100)+'%';
+  const left=Math.max(0,C.TIME_LIMIT-S.t), f=left/C.TIME_LIMIT;
+  $('timeBar').style.width=(f*100)+'%'; $('timeBar').style.background=f<.2?'var(--spill)':'var(--amber)';
+  $('timeTxt').textContent=Math.ceil(left)+'s';
+  const safe=safeZone(S.beers);
+  $('safe').style.width=(safe*100)+'%';
+  $('bubble').style.left=((clamp(S.b,-1,1)+1)/2*100)+'%';
+  $('level').classList.toggle('bad',Math.abs(S.b)>safe);
+  $('progBar').style.width=clamp(S.z/C.TRACK_LENGTH*100,0,100)+'%';
+  $('drink').disabled=S.beers<=0;
+}
+
+/* ---------- flow ---------- */
+function show(id,on){ $(id).classList.toggle('on',on); }
+function updatePreview(){ $('startN').textContent=startBeers; $('previewSafe').style.width=(safeZone(startBeers)*100)+'%'; }
+$('minus').onclick=()=>{ startBeers=Math.max(0,startBeers-1); updatePreview(); };
+$('plus').onclick=()=>{ startBeers++; updatePreview(); };
+updatePreview();
+
+let wakeLock=null;
+function goPhoneMode(){
+  if(!matchMedia('(pointer:coarse)').matches) return;
+  const el=document.documentElement;
+  try{ const r=el.requestFullscreen?el.requestFullscreen({navigationUI:'hide'}):(el.webkitRequestFullscreen&&el.webkitRequestFullscreen());
+    Promise.resolve(r).then(()=>screen.orientation&&screen.orientation.lock&&screen.orientation.lock('portrait')).catch(()=>{}); }catch(e){}
+  try{ navigator.wakeLock&&navigator.wakeLock.request('screen').then(l=>wakeLock=l).catch(()=>{}); }catch(e){}
+}
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden && state==='play' && navigator.wakeLock && (!wakeLock||wakeLock.released)){
+  navigator.wakeLock.request('screen').then(l=>wakeLock=l).catch(()=>{}); } });
+$('tiltBtn').onclick=()=>{ gyro.listening=false; enableGyro(); };
+$('optInvert').onchange=()=>{ invertGyro=$('optInvert').checked!==C.GYRO_INVERT; };
+if(!(window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission==='function') &&
+   !(window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission==='function')) enableGyro();
+updTilt();
+$('understand').onclick=()=>{
+  enableGyro(); audioInit(); goPhoneMode();
+  invertGyro=$('optInvert').checked!==C.GYRO_INVERT;
+  newRun(); lastBeers=-1;
+  show('tutorial',false); show('results',false); show('hud',true);
+  show('stickR',true); show('drink',true);
+  state='countdown';
+  let n=3; $('countTxt').textContent=n; show('countdown',true); SFX.beep(false);
+  const tick=setInterval(()=>{
+    n--;
+    if(n>0){ $('countTxt').textContent=n; SFX.beep(false); }
+    else if(n===0){ $('countTxt').textContent='GO!'; SFX.beep(true);
+      gyro.base=gyro.raw; useGyro=null; syncBalanceMode();
+      state='play'; }
+    else { clearInterval(tick); show('countdown',false); }
+  },800);
+};
+
+function endRun(made){
+  state='results'; S.finished=true;
+  (made?SFX.finish:SFX.fail)();
+  const beerPts=S.beers*C.POINTS_PER_BEER;
+  const timePts=made?Math.max(0,Math.round(C.FIRST_PLACE_POINTS-Math.max(0,S.t-C.PAR_TIME)*C.POINTS_LOST_PER_SEC)):0;
+  const total=made?beerPts+timePts:0;
+  $('resTitle').textContent=made?'Made it to the couch 🛋️':'Out of time 😵';
+  const rows=made?[
+    ['Time',S.t.toFixed(1)+'s (par '+C.PAR_TIME+'s)'],['Beers carried',S.beers],
+    ['Time points',timePts],['Beer points',beerPts+'  ('+C.POINTS_PER_BEER+' each)'],['Score',total]]
+    :[['Distance',Math.round(S.z)+' / '+C.TRACK_LENGTH+' m'],['Beers carried',S.beers],['Score','0 (didn\'t reach the couch)']];
+  $('resTable').innerHTML=rows.map((r,i)=>`<tr class="${i===rows.length-1?'total':''}"><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+  let best=0; try{ best=+localStorage.getItem('hmb-best')||0; if(total>best){ localStorage.setItem('hmb-best',total); } }catch(e){}
+  $('best').textContent= total>best ? 'New personal best!' : (best?('Personal best: '+best):'');
+  show('hud',false); show('stickL',false); show('stickR',false); show('drink',false);
+  setTimeout(()=>show('results',true),600);
+}
+$('again').onclick=()=>{ show('results',false); show('tutorial',true); state='tutorial'; };
+
+/* ---------- loop ---------- */
+newRun();
+let last=performance.now();
+const wrongWayPhone=matchMedia('(orientation:landscape) and (pointer:coarse) and (max-height:600px)');
+let paused=false;
+function setPaused(p,why){
+  if(p===paused) return; paused=p; show('rotateGate',p);
+  if(p){ $('gateTitle').textContent=why==='hidden'?'Paused':'Turn your phone upright';
+         $('gateTxt').textContent=why==='hidden'?'Tap to carry on.':'The game is paused and carries on in portrait.'; }
+  else { gyro.base=gyro.raw; }
+}
+$('rotateGate').addEventListener('pointerdown',()=>{ if(!wrongWayPhone.matches) setPaused(false); });
+document.addEventListener('visibilitychange',()=>{ if(document.hidden && state==='play') setPaused(true,'hidden'); });
+function frame(now){
+  const dt=Math.min(.05,(now-last)/1000); last=now;
+  if(state==='play' && wrongWayPhone.matches) setPaused(true,'portrait');
+  else if(paused && $('gateTitle').textContent!=='Paused' && !wrongWayPhone.matches) setPaused(false);
+  if(state!=='play' && paused) setPaused(false);
+  if(state==='play'){ if(gyro.status==='ok' && performance.now()-gyro.lastT>1500){ gyro.status='silent'; updTilt(); } syncBalanceMode(); }
+  if(state==='tutorial' && gyro.available){ let g=gyro.raw/C.GYRO_RANGE_DEG; if(invertGyro) g=-g;
+    $('tiltBubble').style.left=((clamp(g,-1,1)+1)/2*100)+'%'; }
+  if(state==='play' && !paused) update(dt);
+  render();
+  if(state==='play'||state==='countdown') hud();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
