@@ -256,6 +256,8 @@ const CONFIG = {
   MIN_SPEED: 4.5,            // stick pulled down (never stops: always moving forward)
   MAX_SPEED: 13,             // stick pushed up
   ACCEL: 8,
+  SPEED_STICK_MIN: 0.6,      // speed only changes when the stick is pushed at least this far (0..1) …
+  SPEED_STICK_ANGLE: 25,     // … and within this many degrees of straight up or straight down
   SPEED_CHANGE_RATE: 6,      // m/s per second the chosen speed changes while the stick is pushed up/down; it stays when released
   STRAFE_SPEED: 5.5,
   TAP_PRESS_RATE: 8,         // one-control tapping: how quickly a held side ramps up to full (and eases off on release)
@@ -529,7 +531,11 @@ function syncBalanceMode(){
 function readInput(){
   const k=n=>keys.has(n)?1:0;
   const mx=clamp(dz(stickR.x)+k('arrowright')-k('arrowleft'),-1,1);
-  const my=clamp(dz(stickR.y)+k('arrowup')-k('arrowdown'),-1,1);
+  // speed: only a near-vertical push far from the centre counts
+  let sy=0;
+  const mag=Math.min(1,Math.hypot(stickR.x,stickR.y)), off=Math.atan2(Math.abs(stickR.x),Math.abs(stickR.y))*180/Math.PI;
+  if(mag>=C.SPEED_STICK_MIN && off<=C.SPEED_STICK_ANGLE) sy=Math.sign(stickR.y)*(.4+.6*(mag-C.SPEED_STICK_MIN)/(1-C.SPEED_STICK_MIN));
+  const my=clamp(sy+k('arrowup')-k('arrowdown'),-1,1);
   let bal = k('d')-k('a');
   if(moveMode==='onetap'){
     const want=clamp((tapHeld.r?1:0)-(tapHeld.l?1:0)+bal+k('arrowright')-k('arrowleft'),-1,1);
