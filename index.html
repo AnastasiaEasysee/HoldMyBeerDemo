@@ -134,6 +134,12 @@ tr.total td{border-bottom:0;font-family:Bungee,sans-serif;font-weight:400;font-s
 }
 @media (pointer:coarse){.kbd{display:none}}
 @media (max-width:430px){.card{padding:16px 16px 0} h1{font-size:30px} .lead{font-size:14px;margin-bottom:10px} .cols{font-size:13px;line-height:1.35} .cols p{margin-bottom:6px}}
+.opts label.wide{flex-basis:100%;align-items:flex-start}
+.modes{flex-basis:100%;border:0;margin:0;padding:10px 12px;border-radius:14px;background:rgba(122,97,73,.12);display:flex;flex-direction:column;gap:8px}
+.modes legend{float:left;padding:0;font-weight:800;color:var(--ink);font-size:14px}
+.modes label{align-items:flex-start}.modes input{margin-top:3px}
+.modeNote{font-size:11.5px}
+.opts label.wide input{margin-top:2px}
 .sober{margin:10px 0 4px;font-size:14px}
 .sober label{display:flex;justify-content:space-between;gap:10px}
 .sober label span{color:var(--muted);font-size:13px}
@@ -170,7 +176,7 @@ tr.total td{border-bottom:0;font-family:Bungee,sans-serif;font-weight:400;font-s
   <div class="progress"><div class="ends"><span>Kitchen</span><span>Couch</span></div><div class="bar"><i id="progBar"></i></div></div>
 </div>
 <div class="stick" id="stickL"><span>Balance</span><div class="knob"></div></div>
-<div class="stick" id="stickR"><span>Move / speed</span><div class="knob"></div></div>
+<div class="stick" id="stickR"><span id="stickRLabel">Move / speed</span><div class="knob"></div></div>
 <button id="drink" aria-label="Drink a beer"><span class="e">🍺</span>Drink</button>
 
 <div class="overlay on" id="tutorial">
@@ -207,6 +213,12 @@ tr.total td{border-bottom:0;font-family:Bungee,sans-serif;font-weight:400;font-s
     <div class="opts">
       <label><input type="checkbox" id="optStick"> Use the balance stick instead of tilting</label>
       <label><input type="checkbox" id="optInvert"> Invert tilt direction</label>
+      <fieldset class="modes wide"><legend>Moving left and right</legend>
+        <label><input type="radio" name="mode" value="stick"> Right stick steers, tilt balances</label>
+        <label><input type="radio" name="mode" value="one"> One control: tilting also steers you</label>
+        <label><input type="radio" name="mode" value="tap"> Tap and hold the left or right side of the screen to step; tilt balances</label>
+        <span class="modeNote">In every mode, stepping sideways tips your tray the other way.</span>
+      </fieldset>
     </div>
     <button class="go" id="understand">I understand</button>
   </div>
@@ -242,13 +254,22 @@ const CONFIG = {
   MIN_SPEED: 4.5,            // stick pulled down (never stops: always moving forward)
   MAX_SPEED: 13,             // stick pushed up
   ACCEL: 8,
-  STRAFE_SPEED: 4.5,         // lanes per second
+  STRAFE_SPEED: 5.5,
+  TAP_HEAVY: 0.4,            // tap mode: with a full tray, stepping speed and the tray kick drop by this share
+  TAP_FULL_TRAY: 10,         // tap mode: beers that count as a full tray         // lanes per second at full stick / full lean
+  STEER_CURVE: 0.6,          // <1 makes small movements stronger (1 = linear)
+  STICK_DEADZONE: 0.06,
+  ONE_CONTROL_FULL_TILT: 0.4,  // one-control mode: share of full tilt/stick (0..1) that gives full sideways speed
+  ONE_CONTROL_DEADZONE: 0.03,  // tilt below this keeps you going straight
 
   OBSTACLE_DEPTH: 0.8,
   BOUNCE_SPEED: 7,           // how hard you bounce back off an obstacle
   STUN_TIME: 0.5,
   HIT_COOLDOWN: 0.8,
   BEERS_DROPPED_ON_HIT: 1,
+  JOLT_STRENGTH: 4,          // how hard a crash kicks the tray (balance only; never moves you)
+  JOLT_SPRING: 0,            // 0 = a crash kick stays until you correct it; higher = it settles back by itself
+  JOLT_DAMPING: 8,
   DROPPED_PICKUP_DELAY: 3,   // seconds before a dropped beer can be picked up
   DROPPED_SLIDE_FRICTION: 3,
 
@@ -257,7 +278,14 @@ const CONFIG = {
   SAFE_ZONE_MIN: 0.12,       // never smaller than this
   SPILL_RATE: 1.4,           // beers per second spilled at the very edge of the danger zone
 
-  BALANCE_CONTROL: 5,        // how strongly your input moves the tray
+  BALANCE_MODE: 'direct',    // 'direct': your input pushes the bubble; let go and it stays where it is
+                             // 'momentum': the original harder model where the tray keeps tipping
+  BALANCE_RATE: 1.6,
+  MOVE_KICK: 0.9,            // stepping sideways tips the tray the other way at this rate (all control modes)
+  SPEED_WOBBLE: 0.6,         // random tilts are this much stronger at top speed than at normal speed         // direct mode: meter widths/second the bubble moves at full tilt/stick
+  DRIFT_SOBER: 0,            // direct mode: extra self-tipping when sober (0 = none) …
+  DRIFT_DRUNK: 0.6,          // … and when fully drunk (the bubble keeps sliding the way it leans)
+  BALANCE_CONTROL: 5,        // momentum mode: how strongly your input moves the tray
   BALANCE_DAMPING: 3,
   INSTABILITY_SOBER: 0.4,    // tendency to keep tipping once off-centre
   INSTABILITY_DRUNK: 2.2,
@@ -392,7 +420,7 @@ function makeStick(el){
   return st;
 }
 const stickL=makeStick($('stickL')), stickR=makeStick($('stickR'));
-const dz = v => Math.abs(v)<.12?0:v;
+const dz = v => { const a=Math.abs(v), d=C.STICK_DEADZONE; return a<d?0:Math.sign(v)*Math.pow((a-d)/(1-d),C.STEER_CURVE); };
 document.addEventListener('touchmove',e=>{ if(!e.target.closest('.overlay')) e.preventDefault(); },{passive:false});
 
 /* tilt sensor
@@ -485,7 +513,7 @@ function readInput(){
 let S=null, state='tutorial', startBeers=C.START_BEERS, soberTime=C.SOBER_TIME;
 try{ const v=+localStorage.getItem('hmb-sober'); if(v>=C.SOBER_TIME_MIN&&v<=C.SOBER_TIME_MAX) soberTime=v; }catch(e){}
 function newRun(){
-  S={ t:0, z:0, x:C.LANES/2, vz:C.BASE_SPEED*.4, beers:startBeers, b:0, bv:0, spill:0, drunk:0,
+  S={ t:0, z:0, x:C.LANES/2, vz:C.BASE_SPEED*.4, beers:startBeers, b:0, bv:0, dist:0, dv:0, jolt:0, joltV:0, spill:0, drunk:0,
       boost:0, stun:0, hitCd:0, tilt:null, tiltTimer:C.TILT_INTERVAL_SOBER*(.6+.8*Math.random()),
       obstacles:MAP.map(o=>({...o, knocked:-1})), floor:FLOOR_BEERS.map(b=>({...b, taken:false})),
       dropped:[], pops:[], finished:false, camX:C.LANES/2 };
@@ -522,7 +550,18 @@ function update(dt){
   S.t+=dt;
   const inp=readInput();
   // movement
-  S.x=clamp(S.x+inp.mx*C.STRAFE_SPEED*dt,.35,C.LANES-.35);
+  let steer=inp.mx;
+  if(moveMode==='tap'){ // hold a side of the screen to step that way; a heavier tray steps slower
+    const held=(tapHeld.r?1:0)-(tapHeld.l?1:0);
+    const heavy=1-C.TAP_HEAVY*Math.min(1,S.beers/C.TAP_FULL_TRAY);
+    steer=clamp(held+(keys.has('arrowright')?1:0)-(keys.has('arrowleft')?1:0),-1,1)*heavy;
+  } else if(oneControl){ // your tilt steers you directly; the balance meter never moves you
+    const a=Math.abs(inp.bal), dzn=C.ONE_CONTROL_DEADZONE;
+    steer=Math.sign(inp.bal)*Math.pow(clamp((a-dzn)/(C.ONE_CONTROL_FULL_TILT-dzn),0,1),C.STEER_CURVE);
+  }
+  const xBefore=S.x;
+  S.x=clamp(S.x+steer*C.STRAFE_SPEED*dt,.35,C.LANES-.35);
+  S.steer=(S.x-xBefore)/Math.max(dt,1e-4)/C.STRAFE_SPEED; // actual sideways motion (0 when blocked by a wall)
   let target = inp.my>=0 ? C.BASE_SPEED+inp.my*(C.MAX_SPEED-C.BASE_SPEED) : C.BASE_SPEED+inp.my*(C.BASE_SPEED-C.MIN_SPEED);
   if(S.boost>0) target*=C.DRINK_BOOST_MULT;
   if(S.stun>0) target=0;
@@ -540,15 +579,29 @@ function update(dt){
     S.tilt={f:(Math.random()<.5?-1:1)*F*(.6+.4*Math.random()), r:.4+.7*Math.random()};
     S.tiltTimer=lerp(C.TILT_INTERVAL_SOBER,C.TILT_INTERVAL_DRUNK,d)*(.6+.8*Math.random());
   }
-  let force=(.12*Math.sin(S.t*1.7)+.08*Math.sin(S.t*2.9+1))*(1+3*d);
-  if(S.tilt){ force+=S.tilt.f; S.tilt.r-=dt; if(S.tilt.r<=0) S.tilt=null; }
-  force+=S.b*lerp(C.INSTABILITY_SOBER,C.INSTABILITY_DRUNK,d);
-  force+=inp.bal*C.BALANCE_CONTROL;
-  S.bv+=force*dt; S.bv*=Math.exp(-C.BALANCE_DAMPING*dt); S.b+=S.bv*dt;
-  const safe=safeZone(S.beers), ab=Math.abs(S.b);
+  const sway=(.12*Math.sin(S.t*1.7)+.08*Math.sin(S.t*2.9+1))*(1+3*d);
+  let tiltF=0;
+  if(S.tilt){ tiltF=S.tilt.f; S.tilt.r-=dt; if(S.tilt.r<=0) S.tilt=null; }
+  const fast=clamp((S.vz-C.BASE_SPEED)/(C.MAX_SPEED-C.BASE_SPEED),0,1);
+  tiltF*=1+C.SPEED_WOBBLE*fast;
+  const moveKick=-S.steer*C.MOVE_KICK; // moving sideways tips the tray against the motion
+  if(C.BALANCE_MODE==='direct'){
+    
+    // your input moves the bubble; releasing leaves it where it is. Random tilts push it too.
+    S.dv+=tiltF*dt; S.dv*=Math.exp(-C.BALANCE_DAMPING*dt);
+    S.b+=(inp.bal*C.BALANCE_RATE + moveKick + S.dv + (S.b+S.jolt)*lerp(C.DRIFT_SOBER,C.DRIFT_DRUNK,d) + sway*.1)*dt;
+  } else {
+    let force=sway+tiltF+moveKick*C.BALANCE_DAMPING;
+    force+=S.b*lerp(C.INSTABILITY_SOBER,C.INSTABILITY_DRUNK,d);
+    force+=inp.bal*C.BALANCE_CONTROL;
+    S.bv+=force*dt; S.bv*=Math.exp(-C.BALANCE_DAMPING*dt); S.b+=S.bv*dt;
+  }
+  S.joltV+=-S.jolt*C.JOLT_SPRING*dt; S.joltV*=Math.exp(-C.JOLT_DAMPING*dt); S.jolt+=S.joltV*dt;
+  const tray=S.b+S.jolt; S.tray=tray;
+  const safe=safeZone(S.beers), ab=Math.abs(tray);
   if(ab>=1){
     if(S.beers>0){ S.beers=0; SFX.spillAll(); pop('Spilled everything!','#ff8a7a'); navigator.vibrate&&navigator.vibrate(250); }
-    S.b=0; S.bv=0; S.spill=0;
+    S.b=0; S.bv=0; S.dist=0; S.dv=0; S.jolt=0; S.joltV=0; S.tray=0; S.spill=0;
   } else if(ab>safe && S.beers>0){
     S.spill+=(ab-safe)/(1-safe)*C.SPILL_RATE*dt;
     while(S.spill>=1 && S.beers>0){ S.spill-=1; S.beers--; SFX.lose(); pop('−1 🍺 spilled','#ff8a7a'); }
@@ -564,7 +617,7 @@ function update(dt){
     if(S.hitCd>0) continue;
     S.vzBeforeHit=S.vz; S.vz=-C.BOUNCE_SPEED; S.stun=C.STUN_TIME; S.hitCd=C.HIT_COOLDOWN;
     S.z=Math.min(S.z,o.z-.35);
-    S.bv+=(Math.random()<.5?-1:1)*2.2;
+    S.joltV+=(Math.random()<.5?-1:1)*C.JOLT_STRENGTH;
     SFX.bounce(); navigator.vibrate&&navigator.vibrate(80);
     if(S.beers>0){ dropBeers(C.BEERS_DROPPED_ON_HIT); SFX.lose(); pop('−'+C.BEERS_DROPPED_ON_HIT+' 🍺 dropped','#ff8a7a'); }
   }
@@ -710,21 +763,21 @@ function drawPlayer(g){
   g.fillStyle='rgba(0,0,0,.28)'; g.beginPath(); g.ellipse(x,y,.42*s,.12*s,0,0,Math.PI*2); g.fill();
   if(S.stun>0 && Math.sin(S.t*40)>0) g.globalAlpha=.55;
   if(S.boost>0){ g.shadowColor='#ffd35a'; g.shadowBlur=24; }
-  g.translate(x,y); g.rotate(S.b*.12);
+  g.translate(x,y); g.rotate((S.tray||0)*.12);
   const run=S.z*1.7, sw=Math.sin(run)*.22*s;
   g.lineCap='round'; g.strokeStyle='#2d3a5a'; g.lineWidth=.14*s;
   g.beginPath(); g.moveTo(-.1*s,-.8*s); g.lineTo(-.1*s+sw,-.02*s); g.moveTo(.1*s,-.8*s); g.lineTo(.1*s-sw,-.02*s); g.stroke();
   g.fillStyle='#e8553d'; roundRect(g,-.24*s,-1.45*s,.48*s,.7*s,.1*s); g.fill();
   // arm up to the tray
   g.strokeStyle='#f2c29b'; g.lineWidth=.1*s;
-  g.beginPath(); g.moveTo(.2*s,-1.35*s); g.lineTo(.18*s+S.b*.15*s,-1.95*s); g.stroke();
-  g.beginPath(); g.moveTo(-.2*s,-1.35*s); g.lineTo(-.34*s-S.b*.1*s,-1.0*s); g.stroke();
+  g.beginPath(); g.moveTo(.2*s,-1.35*s); g.lineTo(.18*s+(S.tray||0)*.15*s,-1.95*s); g.stroke();
+  g.beginPath(); g.moveTo(-.2*s,-1.35*s); g.lineTo(-.34*s-(S.tray||0)*.1*s,-1.0*s); g.stroke();
   const flush=Math.round(lerp(242,235,S.drunk)), gcol=Math.round(lerp(194,120,S.drunk));
   g.fillStyle=`rgb(${flush},${gcol},${Math.round(lerp(155,120,S.drunk))})`;
   g.beginPath(); g.arc(0,-1.66*s,.18*s,0,Math.PI*2); g.fill();
   g.fillStyle='#4a2e1f'; g.beginPath(); g.arc(0,-1.7*s,.18*s,Math.PI*1.05,Math.PI*1.95); g.fill();
   // tray + beers
-  g.save(); g.translate(.15*s,-2.0*s); g.rotate(S.b*.7);
+  g.save(); g.translate(.15*s,-2.0*s); g.rotate((S.tray||0)*.7);
   g.shadowBlur=0;
   const n=Math.min(S.beers,10), rowN=5, mw=.13*s, mh=.2*s;
   for(let i=0;i<n;i++){
@@ -755,7 +808,7 @@ function render(){
   const d=S.drunk;
   ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,cv.width,cv.height);
   const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if(d<.02){ ctx.drawImage(off,0,0); return; }
+  if(d<.02){ ctx.drawImage(off,0,0); tapHint(); return; }
   const k=reduce?.4:1;
   const ang=Math.sin(S.t*1.3)*.05*d*k, sc=1+.08*d*k+.03*d*k*Math.sin(S.t*.9);
   ctx.fillStyle='#241610'; ctx.fillRect(0,0,cv.width,cv.height);
@@ -766,6 +819,16 @@ function render(){
   const vg=ctx.createRadialGradient(cv.width/2,cv.height/2,cv.height*.2,cv.width/2,cv.height/2,cv.width*.7);
   vg.addColorStop(0,'rgba(120,40,160,0)'); vg.addColorStop(1,`rgba(120,40,160,${.45*d})`);
   ctx.fillStyle=vg; ctx.fillRect(0,0,cv.width,cv.height);
+  tapHint();
+}
+function tapHint(){ // brief arrows at the start of a run only; nothing is shown while you press
+  if(moveMode!=='tap'||state!=='play'||S.t>=4) return;
+  const w=cv.width/2;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.globalAlpha=.55*(1-S.t/4)+.05;
+  ctx.fillStyle='#fff7e6'; ctx.font=`400 ${Math.round(34*DPR)}px Bungee, Impact, sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('◀', w/2, cv.height*.45); ctx.fillText('▶', w+w/2, cv.height*.45);
+  ctx.globalAlpha=1;
 }
 
 /* ---------- HUD ---------- */
@@ -778,8 +841,8 @@ function hud(){
   $('timeTxt').textContent=Math.ceil(left)+'s';
   const safe=safeZone(S.beers);
   $('safe').style.width=(safe*100)+'%';
-  $('bubble').style.left=((clamp(S.b,-1,1)+1)/2*100)+'%';
-  $('level').classList.toggle('bad',Math.abs(S.b)>safe);
+  $('bubble').style.left=((clamp((S.tray||0),-1,1)+1)/2*100)+'%';
+  $('level').classList.toggle('bad',Math.abs((S.tray||0))>safe);
   $('progBar').style.width=clamp(S.z/C.TRACK_LENGTH*100,0,100)+'%';
   $('drink').disabled=S.beers<=0;
 }
@@ -807,6 +870,17 @@ const showSober=()=>{ $('soberOut').textContent='Fully drunk to sober in '+(sobe
 soberIn.oninput=()=>{ soberTime=+soberIn.value; showSober(); try{ localStorage.setItem('hmb-sober',soberTime); }catch(e){} };
 showSober();
 $('tiltBtn').onclick=()=>{ gyro.listening=false; enableGyro(); };
+let moveMode='stick', oneControl=false;
+try{ const m=localStorage.getItem('hmb-mode')||(localStorage.getItem('hmb-one')==='1'?'one':''); if(['stick','one','tap'].includes(m)) moveMode=m; }catch(e){}
+document.querySelectorAll('input[name=mode]').forEach(r=>{ r.checked=r.value===moveMode;
+  r.onchange=()=>{ if(r.checked){ moveMode=r.value; try{ localStorage.setItem('hmb-mode',moveMode); }catch(e){} } }; });
+// tap mode: fingers held on the left/right half of the game view (the sticks and buttons sit on top and keep their own touches)
+const tapPtr=new Map(), tapHeld={l:false,r:false};
+function syncTap(){ tapHeld.l=[...tapPtr.values()].includes('l'); tapHeld.r=[...tapPtr.values()].includes('r'); }
+cv.addEventListener('pointerdown',e=>{ if(state!=='play'||moveMode!=='tap') return; tapPtr.set(e.pointerId,e.clientX<innerWidth/2?'l':'r'); syncTap(); e.preventDefault(); });
+const tapUp=e=>{ if(tapPtr.delete(e.pointerId)) syncTap(); };
+['pointerup','pointercancel'].forEach(n=>addEventListener(n,tapUp));
+addEventListener('blur',()=>{ tapPtr.clear(); syncTap(); });
 $('optInvert').onchange=()=>{ invertGyro=$('optInvert').checked!==C.GYRO_INVERT; };
 if(!(window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission==='function') &&
    !(window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission==='function')) enableGyro();
@@ -814,6 +888,7 @@ updTilt();
 $('understand').onclick=()=>{
   enableGyro(); audioInit(); goPhoneMode();
   invertGyro=$('optInvert').checked!==C.GYRO_INVERT;
+  oneControl=moveMode==='one'; tapPtr.clear(); syncTap(); $('stickRLabel').textContent=moveMode==='stick'?'Move / speed':'Speed';
   newRun(); lastBeers=-1;
   show('tutorial',false); show('results',false); show('hud',true);
   show('stickR',true); show('drink',true);
