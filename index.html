@@ -56,6 +56,7 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
 .progress .bar{height:6px;border-radius:3px;background:rgba(255,255,255,.2);margin:5px 0 2px;position:relative}
 .progress .bar i{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--amber);border-radius:3px}
 .progress .ends{display:flex;justify-content:space-between}
+.progress .spd{margin-top:3px;font-weight:800;font-variant-numeric:tabular-nums}
 
 @media (orientation:portrait){
   .beers{display:grid;grid-template-columns:auto auto;column-gap:10px;align-items:center;min-width:0;padding:6px 12px}
@@ -173,7 +174,7 @@ tr.total td{border-bottom:0;font-family:Bungee,sans-serif;font-weight:400;font-s
     <div class="timer"><i id="timeBar"></i><b id="timeTxt">80s</b></div>
     <div class="level" id="level"><div class="danger"></div><div class="safe" id="safe"></div><div class="bubble" id="bubble"></div></div>
   </div>
-  <div class="progress"><div class="ends"><span>Kitchen</span><span>Couch</span></div><div class="bar"><i id="progBar"></i></div></div>
+  <div class="progress"><div class="ends"><span>Kitchen</span><span>Couch</span></div><div class="bar"><i id="progBar"></i></div><div class="spd" id="spd"></div></div>
 </div>
 <div class="stick" id="stickL"><span>Balance</span><div class="knob"></div></div>
 <div class="stick" id="stickR"><span id="stickRLabel">Move / speed</span><div class="knob"></div></div>
@@ -255,6 +256,7 @@ const CONFIG = {
   MIN_SPEED: 4.5,            // stick pulled down (never stops: always moving forward)
   MAX_SPEED: 13,             // stick pushed up
   ACCEL: 8,
+  SPEED_CHANGE_RATE: 6,      // m/s per second the chosen speed changes while the stick is pushed up/down; it stays when released
   STRAFE_SPEED: 5.5,
   TAP_PRESS_RATE: 8,         // one-control tapping: how quickly a held side ramps up to full (and eases off on release)
   TAP_SIDE_SPEED: 2.2,       // both tapping modes: lanes per second while a side is held (stick modes use STRAFE_SPEED)
@@ -543,7 +545,7 @@ function readInput(){
 let S=null, state='tutorial', startBeers=C.START_BEERS, soberTime=C.SOBER_TIME;
 try{ const v=+localStorage.getItem('hmb-sober'); if(v>=C.SOBER_TIME_MIN&&v<=C.SOBER_TIME_MAX) soberTime=v; }catch(e){}
 function newRun(){
-  S={ t:0, z:0, x:C.LANES/2, vz:C.BASE_SPEED*.4, beers:startBeers, b:0, bv:0, dist:0, dv:0, jolt:0, joltV:0, lean:0, lurch:0, lurchIn:2, ph:[Math.random()*6.28,Math.random()*6.28,Math.random()*6.28], spill:0, drunk:0,
+  S={ t:0, z:0, x:C.LANES/2, vz:C.BASE_SPEED*.4, beers:startBeers, cruise:C.BASE_SPEED, b:0, bv:0, dist:0, dv:0, jolt:0, joltV:0, lean:0, lurch:0, lurchIn:2, ph:[Math.random()*6.28,Math.random()*6.28,Math.random()*6.28], spill:0, drunk:0,
       boost:0, stun:0, hitCd:0, tilt:null, tiltTimer:C.TILT_INTERVAL_SOBER*(.6+.8*Math.random()),
       obstacles:MAP.map(o=>({...o, knocked:-1})), floor:FLOOR_BEERS.map(b=>({...b, taken:false})),
       dropped:[], pops:[], finished:false, camX:C.LANES/2 };
@@ -592,7 +594,7 @@ function oneLever(inp,dt){
   S.lurchIn-=dt;
   if(S.lurchIn<=0 && drunk>0){ S.lurch=(Math.random()<.5?-1:1)*drunk*(1+Math.random()); S.lurchIn=1.5+Math.random()*2.5; }
   S.lurch*=Math.exp(-3*dt); sway+=S.lurch;
-  const running=S.boost>0 || inp.my>.5;
+  const running=S.boost>0 || S.cruise>C.BASE_SPEED+.5*(C.MAX_SPEED-C.BASE_SPEED);
   if(running) sway*=R.RUN_WOBBLE;
   const heavy=1-R.HEAVY*Math.min(1,S.beers/R.FULL_TRAY);
   const level=Math.min(1,drunk/3);
@@ -624,7 +626,9 @@ function update(dt){
   const sideSpeed=(moveMode==='tap'||moveMode==='onetap')?C.TAP_SIDE_SPEED:C.STRAFE_SPEED;
   S.x=clamp(S.x+steer*sideSpeed*dt,.35,C.LANES-.35);
   S.steer=(S.x-xBefore)/Math.max(dt,1e-4)/sideSpeed; // actual sideways motion (0 when blocked by a wall)
-  let target = inp.my>=0 ? C.BASE_SPEED+inp.my*(C.MAX_SPEED-C.BASE_SPEED) : C.BASE_SPEED+inp.my*(C.BASE_SPEED-C.MIN_SPEED);
+  // cruise control: pushing up/down changes your chosen speed; letting go keeps it
+  S.cruise=clamp(S.cruise+inp.my*C.SPEED_CHANGE_RATE*dt,C.MIN_SPEED,C.MAX_SPEED);
+  let target=S.cruise;
   if(S.boost>0) target*=C.DRINK_BOOST_MULT;
   if(S.stun>0) target=0;
   const rate = S.vz<target ? C.ACCEL : C.ACCEL*2.5;
@@ -906,6 +910,7 @@ function hud(){
   $('safe').style.width=(safe*100)+'%';
   $('bubble').style.left=((clamp((S.tray||0),-1,1)+1)/2*100)+'%';
   $('level').classList.toggle('bad',Math.abs((S.tray||0))>safe);
+  $('spd').textContent='Speed '+Math.round(S.cruise*3.6)+' km/h';
   $('progBar').style.width=clamp(S.z/C.TRACK_LENGTH*100,0,100)+'%';
   $('drink').disabled=S.beers<=0;
 }
