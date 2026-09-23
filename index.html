@@ -134,6 +134,11 @@ tr.total td{border-bottom:0;font-family:Bungee,sans-serif;font-weight:400;font-s
 }
 @media (pointer:coarse){.kbd{display:none}}
 @media (max-width:430px){.card{padding:16px 16px 0} h1{font-size:30px} .lead{font-size:14px;margin-bottom:10px} .cols{font-size:13px;line-height:1.35} .cols p{margin-bottom:6px}}
+.sober{margin:10px 0 4px;font-size:14px}
+.sober label{display:flex;justify-content:space-between;gap:10px}
+.sober label span{color:var(--muted);font-size:13px}
+.sober input{width:100%;margin:8px 0 0;accent-color:var(--amber-deep);height:28px}
+.soberEnds{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
 .tilt{border-radius:14px;padding:10px 12px;margin:8px 0 4px;background:rgba(122,97,73,.12)}
 .tiltHead{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px}
 .tilt p{margin:4px 0 6px;font-size:12.5px;color:var(--muted)}
@@ -188,6 +193,11 @@ tr.total td{border-bottom:0;font-family:Bungee,sans-serif;font-weight:400;font-s
       <div class="step"><button id="minus" aria-label="Fewer beers">−</button><output id="startN">5</output><button id="plus" aria-label="More beers">+</button></div>
       <div class="mini">Beers to start with. More beers score more points but shrink your safe zone.
         <div class="level"><div class="danger"></div><div class="safe" id="previewSafe"></div></div></div>
+    </div>
+    <div class="sober">
+      <label for="soberIn"><strong>Sobering up</strong><span id="soberOut"></span></label>
+      <input type="range" id="soberIn" step="10">
+      <div class="soberEnds"><span>Fast</span><span>Slow</span></div>
     </div>
     <div class="tilt" id="tiltRow" data-status="idle">
       <div class="tiltHead"><strong>Tilt sensor</strong><button id="tiltBtn" class="small">Enable tilt</button></div>
@@ -262,7 +272,9 @@ const CONFIG = {
   DRINK_BOOST_MULT: 1.5,
   DRINK_BOOST_TIME: 3,       // speed boost + invulnerability duration
   DRINK_DRUNK_GAIN: 0.22,    // drunkenness per beer (0..1)
-  SOBER_RATE: 0.025,         // drunkenness lost per second
+  SOBER_TIME: 120,           // default seconds to go from fully drunk to sober (was 40)
+  SOBER_TIME_MIN: 20,        // range of the slider on the start screen
+  SOBER_TIME_MAX: 300,
 
   POINTS_PER_BEER: 5,
   FIRST_PLACE_POINTS: 100,   // single player: full points for beating par time
@@ -470,7 +482,8 @@ function readInput(){
 }
 
 /* ---------- game state ---------- */
-let S=null, state='tutorial', startBeers=C.START_BEERS;
+let S=null, state='tutorial', startBeers=C.START_BEERS, soberTime=C.SOBER_TIME;
+try{ const v=+localStorage.getItem('hmb-sober'); if(v>=C.SOBER_TIME_MIN&&v<=C.SOBER_TIME_MAX) soberTime=v; }catch(e){}
 function newRun(){
   S={ t:0, z:0, x:C.LANES/2, vz:C.BASE_SPEED*.4, beers:startBeers, b:0, bv:0, spill:0, drunk:0,
       boost:0, stun:0, hitCd:0, tilt:null, tiltTimer:C.TILT_INTERVAL_SOBER*(.6+.8*Math.random()),
@@ -517,7 +530,7 @@ function update(dt){
   S.vz+=clamp(target-S.vz,-rate*dt,rate*dt);
   S.z+=S.vz*dt;
   S.boost=Math.max(0,S.boost-dt); S.stun=Math.max(0,S.stun-dt); S.hitCd=Math.max(0,S.hitCd-dt);
-  S.drunk=Math.max(0,S.drunk-C.SOBER_RATE*dt);
+  S.drunk=Math.max(0,S.drunk-dt/soberTime);
 
   // balance
   const d=S.drunk;
@@ -788,6 +801,11 @@ function goPhoneMode(){
 }
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden && state==='play' && navigator.wakeLock && (!wakeLock||wakeLock.released)){
   navigator.wakeLock.request('screen').then(l=>wakeLock=l).catch(()=>{}); } });
+const soberIn=$('soberIn');
+soberIn.min=C.SOBER_TIME_MIN; soberIn.max=C.SOBER_TIME_MAX; soberIn.value=soberTime;
+const showSober=()=>{ $('soberOut').textContent='Fully drunk to sober in '+(soberTime>=60?(Math.floor(soberTime/60)+' min'+(soberTime%60?' '+soberTime%60+' s':'')):soberTime+' s'); };
+soberIn.oninput=()=>{ soberTime=+soberIn.value; showSober(); try{ localStorage.setItem('hmb-sober',soberTime); }catch(e){} };
+showSober();
 $('tiltBtn').onclick=()=>{ gyro.listening=false; enableGyro(); };
 $('optInvert').onchange=()=>{ invertGyro=$('optInvert').checked!==C.GYRO_INVERT; };
 if(!(window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission==='function') &&
